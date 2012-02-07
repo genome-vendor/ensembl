@@ -2,11 +2,13 @@
 
 PKG=$(shell dh_listpackages)
 VERSION=65
-TARGET=$(shell /usr/bin/perl -MConfig -e 'print $Config{vendorlib}, "\n"')
+#TARGET=$(shell /usr/bin/perl -MConfig -e 'print $Config{vendorlib}')
+TARGET=/usr/share/perl5
 
 %:
 	dh $@
 
 override_dh_auto_install:
 	dh_auto_install
+	mkdir -p ./debian/$(PKG)/$(TARGET)
 	cp -r ./ensembl ./debian/$(PKG)/$(TARGET)/ensembl-$(VERSION)
