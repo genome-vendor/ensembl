@@ -7,5 +7,5 @@ Homepage: http://useast.ensembl.org/
 
 Package: ensembl65
 Architecture: amd64
-Depends: 
+Depends: libdbd-mysql-perl, bioperl
 Description: The Ensembl API is used to access ensembl data

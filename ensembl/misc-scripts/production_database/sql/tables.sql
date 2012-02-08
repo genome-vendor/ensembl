@@ -15,38 +15,8 @@ CREATE TABLE species (
   species_prefix VARCHAR(20),
   is_current     BOOLEAN NOT NULL DEFAULT true,
 
-  -- Columns for the web interface:
-  created_by    INTEGER,
-  created_at    DATETIME,
-  modified_by   INTEGER,
-  modified_at   DATETIME,
-
   PRIMARY KEY (species_id),
   UNIQUE INDEX db_name_idx (db_name)
-);
-
--- The 'species_alias' table
--- Lists all aliases for all species including those no longer active
-
-CREATE TABLE species_alias (
-  species_alias_id  INTEGER UNSIGNED NOT NULL AUTO_INCREMENT, -- surrogate key
-  species_id        INTEGER UNSIGNED NOT NULL,      -- FK into species
-  alias             varchar(255) NOT NULL,          -- alias
-  is_current        BOOLEAN NOT NULL DEFAULT true,  -- if it's still current
-  
-  -- Columns for the web interface:
-  created_by    INTEGER,
-  created_at    DATETIME,
-  modified_by   INTEGER,
-  modified_at   DATETIME,
-  
-  PRIMARY KEY (species_alias_id),
-  UNIQUE INDEX (alias, is_current),             -- aliases MUST be unique for 
-                                                -- the current set. A certain 
-                                                -- amount of duplication is 
-                                                -- allowed if an alias moved 
-                                                -- once
-  INDEX sa_speciesid_idx (species_id)
 );
 
 
@@ -85,12 +55,6 @@ CREATE TABLE biotype (
                     NOT NULL DEFAULT 'core',
   description   TEXT,
 
-  -- Columns for the web interface:
-  created_by    INTEGER,
-  created_at    DATETIME,
-  modified_by   INTEGER,
-  modified_at   DATETIME,
-
   PRIMARY KEY (biotype_id),
   UNIQUE INDEX name_type_idx (name, object_type, db_type)
 );
@@ -107,12 +71,6 @@ CREATE TABLE meta_key (
                         'rnaseq', 'variation', 'vega')
                     NOT NULL DEFAULT 'core',
   description       TEXT,
-
-  -- Columns for the web interface:
-  created_by    INTEGER,
-  created_at    DATETIME,
-  modified_by   INTEGER,
-  modified_at   DATETIME,
 
   PRIMARY KEY (meta_key_id),
   UNIQUE INDEX name_type_idx (name, db_type)
@@ -138,12 +96,6 @@ CREATE TABLE analysis_description (
   display_label             VARCHAR(256) NOT NULL,
   is_current                BOOLEAN NOT NULL DEFAULT true,
 
-  -- Columns for the web interface:
-  created_by    INTEGER,
-  created_at    DATETIME,
-  modified_by   INTEGER,
-  modified_at   DATETIME,
-
   PRIMARY KEY (analysis_description_id),
   UNIQUE INDEX logic_name_idx (logic_name)
 );
@@ -165,12 +117,6 @@ CREATE TABLE analysis_web_data (
 
   displayable               BOOLEAN NOT NULL DEFAULT true,
 
-  -- Columns for the web interface:
-  created_by    INTEGER,
-  created_at    DATETIME,
-  modified_by   INTEGER,
-  modified_at   DATETIME,
-
   PRIMARY KEY (analysis_web_data_id),
   UNIQUE INDEX uniq_idx (species_id, db_type, analysis_description_id)
 );
@@ -181,20 +127,12 @@ CREATE TABLE web_data (
   web_data_id               INTEGER UNSIGNED NOT NULL AUTO_INCREMENT,
   data                      TEXT,
 
-  -- Columns for the web interface:
-  created_by    INTEGER,
-  created_at    DATETIME,
-  modified_by   INTEGER,
-  modified_at   DATETIME,
-
   PRIMARY KEY (web_data_id)
 );
 
 -- VIEWS
 
--- The 'db_list' view provides the full database names for all databases
--- in the 'db' table that are current.
-CREATE DEFINER = CURRENT_USER SQL SECURITY INVOKER VIEW db_list AS
+CREATE VIEW db_list AS
 SELECT  db_id AS db_id,
         CONCAT(
           CONCAT_WS('_', db_name, db_type, db_release, db_assembly),
@@ -203,11 +141,7 @@ FROM    species
   JOIN  db USING (species_id)
 WHERE species.is_current = true;
 
--- The 'full_analysis_description' view provids, for each database,
--- /nearly/ exactly what should go into the 'analysis_description'
--- table, apart from the fact that it uses 'analysis.logic_name' rather
--- than 'analysis.analysis_id'.
-CREATE DEFINER = CURRENT_USER SQL SECURITY INVOKER VIEW full_analysis_description AS
+CREATE VIEW full_analysis_description AS
 SELECT  list.full_db_name AS full_db_name,
         ad.logic_name AS logic_name,
         ad.description AS description,
@@ -224,10 +158,7 @@ FROM db_list list
 WHERE   db.is_current = true
   AND   ad.is_current = true;
 
--- The 'logic_name_overview' is a helper view for people trying to
--- make sense of the 'analysis_description', 'analysis_web_data', and
--- 'web_data' tables.
-CREATE DEFINER = CURRENT_USER SQL SECURITY INVOKER VIEW logic_name_overview AS
+CREATE VIEW logic_name_overview AS
 SELECT
   awd.analysis_web_data_id AS analysis_web_data_id,
   ad.logic_name AS logic_name,
@@ -244,9 +175,7 @@ FROM   analysis_description ad
 WHERE   s.is_current = true
   AND   ad.is_current = true;
 
--- The 'unconnected_analyses' view gives back the analyses from
--- 'analysis_description' that are unused in 'analysis_web_data'.
-CREATE DEFINER = CURRENT_USER SQL SECURITY INVOKER VIEW unconnected_analyses AS
+CREATE VIEW unconnected_analyses AS
 SELECT  ad.analysis_description_id AS analysis_description_id,
         ad.logic_name AS logic_name
 FROM    analysis_description ad
@@ -254,20 +183,17 @@ FROM    analysis_description ad
 WHERE   awd.species_id IS NULL
   AND   ad.is_current = true;
 
--- The 'unused_web_data' view gives back the entries in 'web_data' that
--- are not connected to any analysis in 'analysis_web_data'.
-CREATE DEFINER = CURRENT_USER SQL SECURITY INVOKER VIEW unused_web_data AS
+CREATE VIEW unused_web_data AS
 SELECT  wd.web_data_id
 FROM    web_data wd
   LEFT JOIN analysis_web_data awd USING (web_data_id)
 WHERE   awd.analysis_web_data_id IS NULL;
 
 
--- Views for the master tables.  These four views are simply selecting
--- the entries from the corresponding master table that have is_current
--- set to true.
+-- Views for the master tables.  These are simply selecting the entries
+-- from the corresponding master table that have is_current = 1.
 
-CREATE DEFINER = CURRENT_USER SQL SECURITY INVOKER VIEW attrib_type AS
+CREATE VIEW attrib_type AS
 SELECT
   attrib_type_id AS attrib_type_id,
   code AS code,
@@ -277,7 +203,7 @@ FROM    master_attrib_type
 WHERE   is_current = true
 ORDER BY attrib_type_id;
 
-CREATE DEFINER = CURRENT_USER SQL SECURITY INVOKER VIEW external_db AS
+CREATE VIEW external_db AS
 SELECT
   external_db_id AS external_db_id,
   db_name AS db_name,
@@ -293,7 +219,7 @@ FROM    master_external_db
 WHERE   is_current = true
 ORDER BY external_db_id;
 
-CREATE DEFINER = CURRENT_USER SQL SECURITY INVOKER VIEW misc_set AS
+CREATE VIEW misc_set AS
 SELECT
   misc_set_id AS misc_set_id,
   code AS code,
@@ -304,7 +230,7 @@ FROM    master_misc_set
 WHERE   is_current = true
 ORDER BY misc_set_id;
 
-CREATE DEFINER = CURRENT_USER SQL SECURITY INVOKER VIEW unmapped_reason AS
+CREATE VIEW unmapped_reason AS
 SELECT
   unmapped_reason_id AS unmapped_reason_id,
   summary_description AS summary_description,

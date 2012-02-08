@@ -248,7 +248,7 @@ GSQL
      # SQL to add data to core
      #########################
  
-     my $add_xref_sth           = $self->core->dbc->prepare('insert ignore into xref (xref_id, external_db_id, dbprimary_acc, display_label, version, description, info_type, info_text) values (?, ?, ?, ?, ?, ?, ?, ?)');
+     my $add_xref_sth           = $self->core->dbc->prepare('insert into xref (xref_id, external_db_id, dbprimary_acc, display_label, version, description, info_type, info_text) values (?, ?, ?, ?, ?, ?, ?, ?)');
      my $add_object_xref_sth    = $self->core->dbc->prepare('insert into object_xref (object_xref_id, ensembl_id, ensembl_object_type, xref_id, analysis_id) values (?, ?, ?, ?, ?)');
      my $add_identity_xref_sth  = $self->core->dbc->prepare('insert into identity_xref (object_xref_id, xref_identity, ensembl_identity, xref_start, xref_end, ensembl_start, ensembl_end, cigar_line, score, evalue) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
      my $add_go_xref_sth        = $self->core->dbc->prepare('insert into ontology_xref (object_xref_id, source_xref_id, linkage_type) values (?, ?, ?)');
@@ -558,7 +558,6 @@ GSQL
   $get_xref_interpro_sth->bind_columns(\$xref_id, \$acc, \$version, \$label, \$desc, \$type, \$info);
   
   while($get_xref_interpro_sth->fetch){
-    $version||='0';
     $add_xref_sth->execute(($xref_id+$xref_offset), $ex_id, $acc, $label, $version, $desc, 'UNMAPPED', $info);
     $set_unmapped_sth->execute($analysis_id, $ex_id, $acc, $reason_id{"NO_MAPPING"} );
     push @xref_list, $xref_id;
@@ -841,9 +840,9 @@ WEL
 
 sub get_analysis{
   my $self = shift;
-  my %typeToLogicName = ( 'Gene'        => 'xrefexoneratedna',
-                          'Transcript'  => 'xrefexoneratedna',
-                          'Translation' => 'xrefexonerateprotein');
+  my %typeToLogicName = ( 'Gene'        => 'XrefExonerateDNA',
+                          'Transcript'  => 'XrefExonerateDNA',
+                          'Translation' => 'XrefExonerateProtein');
   my %analysis_id;
   foreach my $key (qw(Gene Transcript Translation)){
     my $logic_name = $typeToLogicName{$key};

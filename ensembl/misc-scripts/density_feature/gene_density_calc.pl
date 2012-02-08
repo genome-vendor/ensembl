@@ -27,10 +27,6 @@ my $max_slices = 100;
 
 my ( $host, $user, $pass, $port, $dbname, $pattern  );
 
-my ( $mhost, $mport ) = ( 'ens-staging1', '3306' );
-my ( $muser, $mpass ) = ( 'ensro',        undef );
-my $mdbname = 'ensembl_production';
-
 $port = 3306 ; 
 
 my ( $block_count, $genome_size, $block_size );
@@ -42,9 +38,6 @@ GetOptions(
   "port=i",   \$port,
   "dbname|d=s", \$dbname,
   "pattern=s", \$pattern,
-            "mhost=s", \$mhost,
-            "mport=i", \$mport,
-            "muser=s", \$muser,
   "help" ,               \&usage
 );
 
@@ -135,6 +128,7 @@ foreach my $dbname (@dbnames) {
   my $analysis2 = $aa->fetch_by_logic_name('genedensity');
 
   # Master database location:
+  my ( $mhost, $mport ) = ( 'ens-staging1', '3306' );
   my ( $muser, $mpass ) = ( 'ensro',        undef );
   my $mdbname = 'ensembl_production';
   my $prod_dsn;
@@ -371,7 +365,6 @@ Usage:
 
   $0 -h host [-port port] -u user -p password \\
   $indent -d database | -pattern pattern \\
-  $indent [-mhost ensembl_production host] [-mport ensembl_production host] [-muser ensembl_production host] \\
   $indent [-help]  \\
 
 
@@ -385,19 +378,16 @@ Usage:
 
   -d|dbname            Database name
 
-
-  -mhost              ensembl_production database host to connect to
-
-  -mport              ensembl_production database port to connect to
-
-  -muser              ensembl_production database username
-
-
   -pattern             Database name regexp
 
   -help                This message
 
 
 EOF
+
 }
+
+
+  
+
 

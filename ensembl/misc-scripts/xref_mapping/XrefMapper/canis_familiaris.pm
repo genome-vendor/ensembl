@@ -8,11 +8,7 @@ use vars '@ISA';
 
 sub get_set_lists {
 
-  return [["ExonerateGappedBest5", ["canis_familiaris","RefSeq_mRNA"]],
-	  ["ExonerateGappedBest5", ["canis_familiaris","RefSeq_mRNA_predicted"]],
-	  ["ExonerateGappedBest5", ["canis_familiaris","RefSeq_ncRNA"]],
-	  ["ExonerateGappedBest5", ["canis_familiaris","RefSeq_ncRNA_predicted"]],
-          ["ExonerateGappedBest1", ["canis_familiaris","*"]]];
+  return [["ExonerateGappedBest1", ["canis_familiaris","*"]]];
 
 }
 

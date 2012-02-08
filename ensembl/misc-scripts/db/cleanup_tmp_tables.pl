@@ -1,4 +1,4 @@
-#!/usr/bin/env perl
+#!/usr/local/ensembl/bin/perl
 
 =head1 NAME
 
@@ -6,29 +6,17 @@ cleanup_tmp_tables.pl - delete temporary and backup tables from a database
 
 =head1 SYNOPSIS
 
-  ./cleanup_tmp_tables.pl [arguments]
-  
-  ./cleanup_tmp_tables.pl --nolog --host localhost --port 3306 --user user --dbname DB --dry_run
-  
-  ./cleanup_tmp_tables.pl --nolog --host localhost --port 3306 --user user --dbname '%mydbs%' --dry_run
-  
-  ./cleanup_tmp_tables.pl --nolog --host localhost --port 3306 --user user --dbname DB --interactive 0
+cleanup_tmp_tables.pl [arguments]
 
 Required arguments:
 
-  --dbname, db_name=NAME              database name NAME (can be a pattern)
+  --dbname, db_name=NAME              database name NAME
   --host, --dbhost, --db_host=HOST    database host HOST
   --port, --dbport, --db_port=PORT    database port PORT
   --user, --dbuser, --db_user=USER    database username USER
   --pass, --dbpass, --db_pass=PASS    database passwort PASS
 
 Optional arguments:
-
-  --mart                              Indicates we wish to search for mart
-                                      temporary tables which are normally
-                                      prefixed with MTMP_. 
-                                      ONLY RUN IF YOU ARE A MEMBER OF 
-                                      THE PRODUCTION TEAM
 
   --conffile, --conf=FILE             read parameters from FILE
                                       (default: conf/Conversion.ini)
@@ -44,24 +32,6 @@ Optional arguments:
 
 =head1 DESCRIPTION
 
-A script which looks for any table which we believe could be a temporary
-table. This means any table which contains
-
-=over 8
-
-=item tmp
-
-=item temp
-
-=item bak
-
-=item backup
-
-=item MTMP_ (only used when --mart is specified)
-
-=back
-
-You can run this over multiple DBs but caution is advised
 
 =head1 LICENCE
 
@@ -102,9 +72,8 @@ my $support = new Bio::EnsEMBL::Utils::ConversionSupport($SERVERROOT);
 
 # parse options
 $support->parse_common_options(@_);
-$support->parse_extra_options(qw/mart!/);
 $support->allowed_params(
-  $support->get_common_params, 'mart'
+  $support->get_common_params,
 );
 
 if ($support->param('help') or $support->error) {
@@ -120,57 +89,40 @@ $support->init_log;
 
 $support->check_required_params;
 
-my @databases;
-
-# connect to database
-my $dbh = $support->get_dbconnection('');
-
-if($support->param('dbname') =~ /%/) {
-  my $ref = $dbh->selectall_arrayref('show databases like ?', {}, $support->param('dbname'));
-  push(@databases, map {$_->[0]} @{$ref})
-}
-else {
-  push(@databases, $support->param('dbname'));
-}
+# connect to database and get adaptors
+my $dba = $support->get_database('ensembl');
+my $dbh = $dba->dbc->db_handle;
 
 # find all temporary and backup tables
 my @tables;
 
-my @patterns = map { '%'.$_.'%' } qw/tmp temp bak backup/;
-if($support->param('mart')) {
-  if($support->user_proceed('--mart was specified on the command line. Do not run this during a mart build. Do you wish to continue?')) {
-    push(@patterns, 'MTMP\_%');
+foreach my $pattern (qw(tmp temp bak backup)) {
+  my $sql = qq(SHOW TABLES LIKE '\%$pattern\%');
+  my $sth = $dbh->prepare($sql);
+  $sth->execute;
+  while (my ($table) = $sth->fetchrow_array) {
+    push @tables, $table;
   }
 }
 
-foreach my $db (@databases) {
-  $support->log('Switching to '.$db);
-  $dbh->do('use '.$db);
-  foreach my $pattern (@patterns) {
-    my $ref = $dbh->selectall_arrayref('show tables like ?', {}, $pattern);
-    push(@tables, map {$_->[0]} @{$ref});
+if ($support->param('dry_run')) {
+  # for a dry run, only show which databases would be deleted
+  $support->log("Temporary and backup tables found:\n");
+  foreach my $table (sort @tables) {
+    $support->log("$table\n", 1);
   }
-  
-  @tables = sort @tables;
-  
-  if ($support->param('dry_run')) {
-    # for a dry run, only show which databases would be deleted
-    $support->log("Temporary and backup tables found:\n");
-    foreach my $table (@tables) {
-      $support->log("$table\n", 1);
-    }
-  
-  } else {
-    # delete tables
-    foreach my $table (@tables) {
-      if ($support->user_proceed("Drop table $table?")) {
-        $support->log("Dropping table $table...\n");
-        $dbh->do("DROP TABLE $table");
-        $support->log("Done.\n");
-      }
+
+} else {
+  # delete tables
+  foreach my $table (sort @tables) {
+    if ($support->user_proceed("Drop table $table?")) {
+      $support->log("Dropping table $table...\n");
+      $dbh->do("DROP TABLE $table");
+      $support->log("Done.\n");
     }
   }
 }
+
 # finish logfile
 $support->finish_log;
 

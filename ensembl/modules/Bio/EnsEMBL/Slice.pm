@@ -1,6 +1,6 @@
 =head1 LICENSE
 
-  Copyright (c) 1999-2012 The European Bioinformatics Institute and
+  Copyright (c) 1999-2011 The European Bioinformatics Institute and
   Genome Research Limited.  All rights reserved.
 
   This software is distributed under a modified Apache license.
@@ -1522,13 +1522,11 @@ sub get_all_SimpleFeatures {
   Arg [1]    : (optional) string $logic_name
                The name of the analysis performed on the repeat features
                to obtain.
-  Arg [2]    : (optional) string/array $repeat_type
-               Limits features returned to those of the specified 
-               repeat_type. Can specify a single value or an array reference
-               to limit by more than one
+  Arg [2]    : (optional) string $repeat_type
+               Limits features returned to those of the specified repeat_type
   Arg [3]    : (optional) string $db
                Key for database e.g. core/vega/cdna/....
-  Example    : @repeat_feats = @{$slice->get_all_RepeatFeatures(undef,'Type II Transposons')};
+  Example    : @repeat_feats = @{$slice->get_all_RepeatFeatures(undef,'LTR')};
   Description: Retrieves the RepeatFeatures which overlap  with
                logic name $logic_name and with score above $score.  If
                $logic_name is not defined features of all logic names are
@@ -1842,45 +1840,14 @@ sub get_all_CopyNumberVariantProbes {
 }
 
 
-sub _get_StructuralVariationFeatureAdaptor {
-    
-  my $self = shift;
-    
-  if(!$self->adaptor()) {
-    warning('Cannot get structural variation features without attached adaptor');
-    return undef;
-  }
-    
-  my $svf_adaptor = Bio::EnsEMBL::DBSQL::MergedAdaptor->new(
-    -species  => $self->adaptor()->db()->species, 
-    -type     => "StructuralVariationFeature"
-  );
-  
-  if( $svf_adaptor ) {
-    return $svf_adaptor;
-  }
-  else {
-    warning("Variation database must be attached to core database to " .
-            "retrieve variation information" );
-        
-    return undef;
-  }
-}
-
-
 =head2 get_all_StructuralVariationFeatures
 
-    Arg[1]      : string $source [optional]
-		Arg[2]      : int $include_evidence [optional]
+    Arg[1]      : $source [optional]
     Description : returns all structural variation features on this slice. This function will only work
                   correctly if the variation database has been attached to the core database.
                   If $source is set, only structural variation features with that source name will be 
 									returned. By default, it only returns structural variant features which are not labelled 
 									as "CNV_PROBE".
-									If $include_evidence is set (i.e. $include_evidence=1), structural variation features from 
-							    both structural variation (SV) and their supporting structural variations (SSV) will be 
-							    returned. By default, it only returns features from structural variations (SV). 
-							    from structural variations.
     ReturnType  : listref of Bio::EnsEMBL::Variation::StructuralVariationFeature
     Exceptions  : none
     Caller      : contigview, snpview, structural_variation_features
@@ -1889,21 +1856,29 @@ sub _get_StructuralVariationFeatureAdaptor {
 =cut
 
 sub get_all_StructuralVariationFeatures {
-  my $self             = shift;
-  my $source           = shift;
-	my $include_evidence = shift;
-	my $sv_class         = shift;
+  my $self     = shift;
+  my $source   = shift;
+	my $sv_class = shift;
 	
 	my $operator = '';
 	
   if (!defined($sv_class)) { 
 		$sv_class = 'SO:0000051'; # CNV_PROBE
-		$operator = '!'; # All but CNV_PROBE
+		$operator = '!';
 	}
-	
-	my $svf_adaptor = $self->_get_StructuralVariationFeatureAdaptor;
+
+  if(!$self->adaptor()) {
+    warning('Cannot get structural variation features without attached adaptor');
+    return [];
+  }
 	
 	my $variation_db = $self->adaptor->db->get_db_adaptor('variation');
+
+  unless($variation_db) {
+		warning("Variation database must be attached to core database to " .
+						"retrieve variation information" );
+		return [];
+  }
 	
 	# Get the attrib_id
 	my $at_adaptor = $variation_db->get_AttributeAdaptor;
@@ -1916,15 +1891,13 @@ sub get_all_StructuralVariationFeatures {
 	}
 	
 	# Get the structural variations features
+  my $svf_adaptor = $variation_db->get_StructuralVariationFeatureAdaptor;
   if( $svf_adaptor ) {
-	
-		my $constraint = qq{ svf.class_attrib_id $operator=$attrib_id };
-		   $constraint .= qq{ AND svf.is_evidence=0 } if (!$include_evidence);
 
-		if($source) {
-      return $svf_adaptor->fetch_all_by_Slice_constraint($self, qq{$constraint AND s.name = '$source'});
+		if(defined $source) {
+      return $svf_adaptor->fetch_all_by_Slice_constraint($self, qq{ s.name = '$source' AND svf.class_attrib_id $operator= '$attrib_id'});
     }else {
-			return $svf_adaptor->fetch_all_by_Slice_constraint($self, $constraint);
+			return $svf_adaptor->fetch_all_by_Slice_constraint($self, qq{ svf.class_attrib_id $operator= '$attrib_id'});
     }
   }
   else {
@@ -1935,36 +1908,9 @@ sub get_all_StructuralVariationFeatures {
 }
 
 
-=head2 get_all_StructuralVariationFeatures_by_VariationSet
-
-    Arg [1]     : Bio::EnsEMBL:Variation::VariationSet $set
-    Description :returns all structural variation features on this slice associated with a 
-                 given set.
-                 This function will only work correctly if the variation database has been
-                 attached to the core database. 
-    ReturnType : listref of Bio::EnsEMBL::Variation::StructuralVariationFeature
-    Exceptions : none
-    Caller     : contigview, snpview
-    Status     : At Risk
-
-=cut
-
-sub get_all_StructuralVariationFeatures_by_VariationSet {
-  my $self = shift;
-  my $set = shift;
-
-  if (my $svf_adaptor = $self->_get_StructuralVariationFeatureAdaptor) {
-    return $svf_adaptor->fetch_all_by_Slice_VariationSet($self, $set);  
-  }
-  else {
-    return [];
-  }
-}
-
-
 =head2 get_all_CopyNumberVariantProbeFeatures
 
-    Arg[1]      : string $source [optional]
+    Arg[1]      : $source [optional]
     Description : returns all copy number variant probes on this slice. This function will only work
                   correctly if the variation database has been attached to the core database.
                   If $source is set, only CNV probes with that source name will be returned.
@@ -1980,7 +1926,7 @@ sub get_all_CopyNumberVariantProbeFeatures {
 	my $self   = shift;
   my $source = shift;
 	
-	return $self->get_all_StructuralVariationFeatures($source,0,'SO:0000051');
+	return $self->get_all_StructuralVariationFeatures($source,'SO:0000051');
 }
 
 
@@ -3067,7 +3013,7 @@ sub get_all_compara_Syntenies {
   my $cs = $self->coord_system()->name();
   my $sr = $self->seq_region_name();
   my ($dnafrag) = @{$dfa->fetch_all_by_GenomeDB_region($this_gdb, $cs, $sr)};
-  return $sra->fetch_all_by_MethodLinkSpeciesSet_DnaFrag($mlss, $dnafrag, $self->start, $self->end);
+  return $sra->fetch_by_MethodLinkSpeciesSet_DnaFrag($mlss, $dnafrag, $self->start, $self->end);
 }
 
 =head2 get_all_Haplotypes

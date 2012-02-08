@@ -2,9 +2,6 @@
 
 scriptname=$0
 
-# THIS IS WHERE PERL WILL BE PICKED UP FROM:
-export PATH=/software/perl-5.8.8/bin:${PATH}
-
 function usage {
   cat >&2 <<EOT
 
@@ -55,6 +52,7 @@ if [[ ${conf#/} == ${conf} ]]; then
   exit
 fi
 
+export PATH=/software/perl-5.8.8/bin:${PATH}
 ./run.pl --lsf --conf=${conf} --logauto --mode=${mode}
 
-# $Id: myRun.ksh,v 1.6 2011/11/30 11:42:01 ak4 Exp $
+# $Id: myRun.ksh,v 1.5 2011/11/12 11:14:48 ak4 Exp $

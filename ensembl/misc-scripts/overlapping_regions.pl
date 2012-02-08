@@ -21,7 +21,7 @@ Required arguments:
  
 Optional arguments:
 
-  -n, --dry, --dry_run                don't write results to database
+  -n, --dry, --dry_run=0|1            don't write results to database
   -h, --help, -?                      print help (this message)
 
 Please note that where an argument expects a value, this is true for all
@@ -114,9 +114,6 @@ $sql = "SHOW DATABASES LIKE '".$support->param('pattern')."'";
 $sth = $dbh->prepare($sql);
 $sth->execute;
 
-if ($support->param('dry_run')) {
-  $support->log_stamped("Dry run. Results will not be written to the database.\n\n");
-}
 # loop over databases
 while (my ($dbname) = $sth->fetchrow_array) {
    $support->log_stamped("$dbname\n");
@@ -143,7 +140,7 @@ while (my ($dbname) = $sth->fetchrow_array) {
 	  $support->log("\tDatabase looks correct\n");
 	  $overlaps = 'false';
       }
-      if (!$support->param('dry_run')){
+      if (defined $support->param('dry_run') and !$support->param('dry_run')){
 	  #let's write results to the database. First remove previous entry
 	  $sql = qq(DELETE FROM meta where meta_key = 'assembly.overlapping_regions');
 	  $dbh->do($sql);

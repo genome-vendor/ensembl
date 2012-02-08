@@ -27,7 +27,7 @@ CREATE TABLE xref (
   PRIMARY KEY (xref_id),
   UNIQUE acession_idx(accession,source_id,species_id)
 
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
 
 ################################################################################
 
@@ -40,7 +40,7 @@ CREATE TABLE primary_xref (
 
   PRIMARY KEY (xref_id)
 
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
 
 ################################################################################
 
@@ -56,7 +56,7 @@ CREATE TABLE dependent_xref (
   KEY dependent_idx(dependent_xref_id),
   KEY object_id(object_xref_id)
 
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
 
 
 
@@ -72,7 +72,7 @@ CREATE TABLE synonym (
   KEY xref_idx(xref_id),
   KEY synonym_idx(synonym)
 
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
 
 ################################################################################
 
@@ -81,7 +81,7 @@ CREATE TABLE dependent_source (
   dependent_name             varchar(255) not null,
 
   PRIMARY KEY (master_source_id, dependent_name)
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
 
 ################################################################################
 
@@ -99,7 +99,7 @@ CREATE TABLE source (
   PRIMARY KEY (source_id),
   KEY name_idx(name) 
 
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
 
 ################################################################################
 
@@ -118,7 +118,7 @@ CREATE TABLE source_url (
   PRIMARY KEY (source_url_id),
   KEY source_idx(source_id)
 
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
 
 ################################################################################
 
@@ -131,7 +131,7 @@ CREATE TABLE gene_direct_xref (
   KEY primary_idx(general_xref_id),
   KEY ensembl_idx(ensembl_stable_id)
 
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
 
 
 CREATE TABLE transcript_direct_xref (
@@ -143,7 +143,7 @@ CREATE TABLE transcript_direct_xref (
   KEY primary_idx(general_xref_id),
   KEY ensembl_idx(ensembl_stable_id)
 
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
 
 CREATE TABLE translation_direct_xref (
 
@@ -154,7 +154,7 @@ CREATE TABLE translation_direct_xref (
   KEY primary_idx(general_xref_id),
   KEY ensembl_idx(ensembl_stable_id)
 
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
 
 ################################################################################
 
@@ -170,7 +170,7 @@ CREATE TABLE species (
   UNIQUE KEY species_taxonomy_idx(species_id,taxonomy_id),
   KEY name_idx(name)
 
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
 
 ################################################################################
 
@@ -180,7 +180,7 @@ CREATE TABLE interpro (
   pfam                   varchar(255) not null,
   dbtype                 enum ('PROSITE','PFAM','PREFILE','PROFILE','TIGRFAMs','PRINTS','PIRSF','SMART','SSF')  not null
 
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
 
 ################################################################################
 
@@ -190,7 +190,7 @@ CREATE TABLE pairs (
   accession1                     varchar(255) not null,
   accession2                     varchar(255) not null
 
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
 ################################################################################
 
 -- Table for coordinate-based Xrefs, based
@@ -213,7 +213,7 @@ CREATE TABLE coordinate_xref (
   UNIQUE KEY coord_xref_idx(coord_xref_id),
   INDEX start_pos_idx(species_id, chromosome, strand, txStart),
   INDEX end_pos_idx(species_id, chromosome, strand, txEnd)
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
 
 ################################################################################
 ################################################################################
@@ -229,7 +229,7 @@ CREATE TABLE mapping (
   method         VARCHAR(255),
   array_size     INT UNSIGNED
 
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
 
 CREATE TABLE mapping_jobs (
   root_dir          text,
@@ -243,7 +243,7 @@ CREATE TABLE mapping_jobs (
   object_xref_start INT UNSIGNED,
   object_xref_end   INT UNSIGNED
 
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
 
 CREATE TABLE gene_transcript_translation (
 
@@ -254,7 +254,7 @@ CREATE TABLE gene_transcript_translation (
   INDEX gene_idx (gene_id),
   INDEX translation_idx (translation_id)
 
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
 
 CREATE TABLE core_database (
   port		INT UNSIGNED,
@@ -264,7 +264,7 @@ CREATE TABLE core_database (
   xref_dir      text,
   core_dir      text
 
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
   
 
 
@@ -274,7 +274,7 @@ CREATE TABLE havana_status (
   status       enum('KNOWN','NOVEL','PUTATIVE','PREDICTED','KNOWN_BY_PROJECTION','UNKNOWN'),
   UNIQUE KEY status_idx(stable_id)
 
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
 
 #
 # Try to keep the status in the correct order
@@ -284,9 +284,9 @@ CREATE TABLE havana_status (
 CREATE TABLE process_status (
   id            INT(10) UNSIGNED NOT NULL AUTO_INCREMENT,
   status	enum('xref_created','parsing_started','parsing_finished','alt_alleles_added',
-                     'xref_fasta_dumped','core_fasta_dumped','core_data_loaded',
+                     'xref_fasta_dumped','core_fasta_dumped',
                      'mapping_submitted','mapping_finished','mapping_processed',
-                     'direct_xrefs_parsed',
+                     'core_data_loaded','direct_xrefs_parsed',
                      'prioritys_flagged','processed_pairs','biomart_test_finished',
                      'source_level_move_finished','alt_alleles_processed',	
                      'official_naming_done',
@@ -296,7 +296,7 @@ CREATE TABLE process_status (
                      'core_loaded','display_xref_done','gene_description_done'),
   date          DATETIME NOT NULL,
   PRIMARY KEY (id)
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
 
 
                      
@@ -329,19 +329,18 @@ CREATE TABLE gene_stable_id (
   PRIMARY KEY (stable_id),
   INDEX internal_idx (internal_id)
 
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
 
 CREATE TABLE transcript_stable_id (
 
   internal_id                 INT UNSIGNED NOT NULL,
   stable_id                   VARCHAR(128) NOT NULL,
   display_xref_id             INT UNSIGNED DEFAULT NULL,
-  biotype                     VARCHAR(40) NOT NULL,
 
   PRIMARY KEY (stable_id),
   INDEX internal_idx (internal_id)
 
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
 
 CREATE TABLE translation_stable_id (
 
@@ -351,7 +350,7 @@ CREATE TABLE translation_stable_id (
   PRIMARY KEY (stable_id),
   INDEX internal_idx (internal_id)
 
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
 
 
 
@@ -379,7 +378,7 @@ CREATE TABLE object_xref (
   KEY oxref_idx (object_xref_id, xref_id, ensembl_object_type, ensembl_id),
   KEY xref_idx (xref_id, ensembl_object_type)
 
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
 
 
 CREATE TABLE identity_xref (
@@ -401,7 +400,7 @@ CREATE TABLE identity_xref (
   PRIMARY KEY (object_xref_id)
 --  KEY analysis_idx (analysis_id)
 
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
 
 CREATE TABLE go_xref (
 
@@ -412,7 +411,7 @@ CREATE TABLE go_xref (
   KEY (source_xref_id),
   UNIQUE (object_xref_id, source_xref_id, linkage_type)
 
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
 
 
 CREATE TABLE meta (
@@ -427,7 +426,7 @@ CREATE TABLE meta (
   UNIQUE    KEY species_key_value_idx (meta_id, species_id, meta_key, meta_value),
             KEY species_value_idx (species_id, meta_value)
 
-) COLLATE=latin1_swedish_ci ENGINE=InnoDB;
+) COLLATE=latin1_swedish_ci TYPE=InnoDB;
 
 
 

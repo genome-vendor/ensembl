@@ -17,7 +17,7 @@ use FindBin qw($Bin);
 use Getopt::Long;
 use IO::Zlib;
 use Data::Dumper;
-use HTML::Entities;
+
                             
 BEGIN{                                                                                                                                                                         
   unshift @INC, "$Bin/../../../conf";                                                                                                                                            
@@ -486,7 +486,7 @@ g.seq_region_id=ae.seq_region_id and ae.exc_type='HAP'", [qw(gene_id)]
         print "Done Get Genes query...\n---------------------\n";
 
         my %hash = map { $_->[0] } @$gene_info;
-        my $ecount = scalar(keys(%hash)). "\n\n";
+        my $ecount = scalar keys %hash, "\n\n";
 
         my %old;
 
@@ -734,7 +734,7 @@ sub geneLineXML {
     foreach my $ext_db_name ( keys %$external_identifiers ) {
 
         if ( $ext_db_name =~
-            /(Uniprot|GOA|GO|Interpro|Medline|Sequence_Publications|EMBL)/ )
+            /(Uniprot|GO|Interpro|Medline|Sequence_Publications|EMBL)/ )
         {
 
             my $matched_db_name = $1;
@@ -816,7 +816,7 @@ sub geneLineXML {
     map {
         $synonyms .=
           qq{     
-      <field name="gene_synonym">} . encode_entities($_) . qq{</field> }
+      <field name="gene_synonym">} . encode_entities($_) . {</field> }
     } keys %$unique_synonyms;
 
     my $additional_fields .= qq{

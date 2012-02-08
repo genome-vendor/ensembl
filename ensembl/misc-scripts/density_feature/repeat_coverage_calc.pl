@@ -24,20 +24,12 @@ use strict;
 use Getopt::Long;
 
 my ( $host, $user, $pass, $port, $dbname  );
-   # Master database location:
-   my ( $mhost, $mport ) = ( 'mysql-eg-pan-1.ebi.ac.uk', '4276' );
-  my ( $muser, $mpass ) = ( 'ensro',        undef );
-   my $mdbname = 'ensembl_production';
-
 
 GetOptions( "host|h=s", \$host,
 	    "user|u=s", \$user,
 	    "pass|p=s", \$pass,
 	    "port=i",   \$port,
 	    "dbname|d=s", \$dbname,
-            "mhost=s", \$mhost,
-            "mport=i", \$mport,
-            "muser=s", \$muser,
 	    "help" ,               \&usage
 	  );
 
@@ -90,6 +82,10 @@ my $analysis = $aa->fetch_by_logic_name('percentagerepeat');
 
 if ( !defined($analysis) ) {
 
+   # Master database location:
+   my ( $mhost, $mport ) = ( 'ens-staging1', '3306' );
+   my ( $muser, $mpass ) = ( 'ensro',        undef );
+   my $mdbname = 'ensembl_production';
 
    my $prod_dsn = sprintf( 'DBI:mysql:host=%s;port=%d;database=%s',
                      $mhost, $mport, $mdbname );
@@ -348,7 +344,6 @@ seqs.
 Usage:
   $0 -h host [-port port] -u user -p password \\
   $indent -d database  \\
-  $indent [-mhost ensembl_production host] [-mport ensembl_production host] [-muser ensembl_production host] \\
   $indent [-help]  \\
 
 
@@ -359,12 +354,6 @@ Usage:
   -u|user            Database username
 
   -p|pass            Password for user
-
-  -mhost              ensembl_production database host to connect to
-
-  -mport              ensembl_production database port to connect to
-
-  -muser              ensembl_production database username
 
   -d|dbname          Database name
 

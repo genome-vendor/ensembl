@@ -1,6 +1,6 @@
 =head1 LICENSE
 
-  Copyright (c) 1999-2012 The European Bioinformatics Institute and
+  Copyright (c) 1999-2011 The European Bioinformatics Institute and
   Genome Research Limited.  All rights reserved.
 
   This software is distributed under a modified Apache license.
@@ -656,11 +656,7 @@ sub display_xref {
   Example       : if ($transcript->is_canonical()) { ... }
 
   Description : Returns true (non-zero) if the transcript is the
-                canonical transcript of its gene, false (0) if not. If the code
-                returns an undefined it is because its state is not currently
-                known. Internally the code will consult the database for this
-                value if it is unknown and the transcript has a dbID and an
-                attached adaptor
+                canonical transcript of its gene, false (0) if not.
 
   Return type   : Boolean
 
@@ -670,20 +666,12 @@ sub display_xref {
 
 sub is_canonical {
   my ( $self, $value ) = @_;
-  
-  #Shortcut call
-  return $self->{is_canonical} if defined $self->{is_canonical};
-  
+
   if ( defined($value) ) {
-    $self->{is_canonical} = ( $value ? 1 : 0 );
-  }
-  else {
-    if(! defined $self->{is_canonical} && $self->dbID() && $self->adaptor()) {
-      $self->{is_canonical} = $self->adaptor()->is_Transcript_canonical($self);
-    }
+    $self->{'is_canonical'} = ( $value != 0 );
   }
 
-  return $self->{is_canonical};
+  return $self->{'is_canonical'};
 }
 
 =head2 translation
@@ -2684,7 +2672,7 @@ sub summary_as_hash {
 
 =head2 get_Gene
   
-  Example     : $gene = $transcript->get_Gene;
+  Example     : $gene = $transcript->get_parent_Gene;
   Description : Locates the parent Gene using a transcript dbID
   Returns     : Bio::EnsEMBL::Gene
 

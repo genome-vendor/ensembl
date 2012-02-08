@@ -119,40 +119,11 @@ perl scripts/import.lrg.pl  -verbose -do_all -host ens-staging -port
 homo_sapiens_cdna_65_37 -vega homo_sapiens_vega_65_37 -rnaseq
 homo_sapiens_rnaseq_65_37 -verify  >& verify.OUT
 
-c shell script to generate the commands:
-
-set db_args = '-host ens-staging -port 3306 -user ensadmin -pass ensembl'
-#delete cdna if it's not ready yet, LRGs will be imported into cdna from core
-set db_types =(core otherfeatures vega rnaseq cdna)
-set species = 'homo_sapiens'
-set dbs = ''
-
-set options = (clean import overlap verify)
-set version = '66_37'
-
-
-foreach type ($db_types)
-	set dbs = "${dbs} -${type} ${species}_${type}_${version}"
-end
-
-foreach option ($options)
-	if ($option == 'import') then
-	   set command_line_args = "$db_args $dbs -$option -xrefs"
-	else 
-	   set command_line_args = "$db_args $dbs -$option "
-	endif
-	echo "perl scripts/import.lrg.pl  -verbose -do_all $command_line_args >& $option.OUT"
-
-end
-
-exit;
-
 
 If the cdna databases are not yet ready then remove the "-cdna
 homo_sapiens_cdna_65_37" bit and continue but let who ever is building
-this database know that you are doing the LRGs. They should wait until 
-LRGs import is complete and can use all of the assembly info from core, 
-including the LRG data to build the cDNA db.
+this database know that you are doing the LRGs so that they get the same
+data.
 
 Run the parsing
 ---------------
@@ -344,7 +315,7 @@ So for mapper1.out
 >Options: -file xref_input
 >running in verbose mode
 
-Informs the user how the mapper was run
+Informs the user how the mapper was ran
 
 >current status is parsing_finished
 
@@ -405,8 +376,8 @@ chosen at this point.
 >	NEW	2733
 >2733 new relationships added
 
-For some xrefs that can be considered as being paired i.e. RefSeq_Peptide and 
-RefSeq_mrna, if we match one of these but not its pair then we add this 
+For some xrefs thet can be considered as being paied i.e. RefSeq_Peptide and 
+RefSeq_mrna so if we match one of these but not its pair then we add this 
 relationship in now.
 
 
@@ -468,12 +439,14 @@ only ever in the core database and are left alone, these are sources like OTTG,
 OTTT, Vega_translation as these are set by the merging code (used by the 
 genebuilders to produce the core database). 
 
-NOTE: The xrefs are updated by deleting the sources it is updating and then adding
+NOTE: The xrefs are updated by deleted the sources it is updating and then adding
 the new ones, so if we are not updating a source it will still stay in the core
 database.
 
 
 >xref_mapper.pl FINISHED NORMALLY
+
+The script has finished normally after 
 
 
 
@@ -486,7 +459,7 @@ mapper2.out gives a sample output for this.
 >current status is tests_finished
 
 Report the current status of the xref_database. This is used to work out what 
-to do next. We can see here that the tests are finished and we are ready to 
+to do next. So we can see here that the test are finished and we are ready to 
 load the data.
 
 

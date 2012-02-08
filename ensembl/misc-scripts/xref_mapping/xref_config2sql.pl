@@ -1,6 +1,6 @@
 #!/usr/local/ensembl/bin/perl -w
 
-# $Id: xref_config2sql.pl,v 1.19 2012/01/09 15:01:32 mk8 Exp $
+# $Id: xref_config2sql.pl,v 1.18 2011/09/09 16:47:24 ianl Exp $
 
 ########################################################################
 #                                                                      #
@@ -105,15 +105,6 @@ foreach my $source_section ( sort( $config->GroupMembers('source') ) ) {
           $config->val( $source_section, 'prio_descr' ) );
 
   print("\n");
-
-  my @dependents =
-       split( /\,/, $config->val( $source_section, 'dependent', '' ) );
-
-  foreach my $dep (@dependents){
-      print "# adding source dependency that $source_section needs $dep loaded first\n";
-      print "INSERT IGNORE INTO dependent_source (master_source_id, dependent_name)\n";
-      printf( "VALUES (%d, '%s');\n\n", $source_ids{$source_section}, $dep);
-  }
 
 } ## end foreach my $source_section ...
 

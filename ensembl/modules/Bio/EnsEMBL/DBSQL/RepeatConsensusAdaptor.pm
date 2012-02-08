@@ -1,6 +1,6 @@
 =head1 LICENSE
 
-  Copyright (c) 1999-2012 The European Bioinformatics Institute and
+  Copyright (c) 1999-2011 The European Bioinformatics Institute and
   Genome Research Limited.  All rights reserved.
 
   This software is distributed under a modified Apache license.
@@ -43,28 +43,12 @@ objects.
 package Bio::EnsEMBL::DBSQL::RepeatConsensusAdaptor;
 
 use strict;
-use warnings;
 use Bio::EnsEMBL::DBSQL::BaseAdaptor;
 use Bio::EnsEMBL::RepeatConsensus;
 use Bio::EnsEMBL::Utils::Exception qw(throw deprecate);
 
-use base qw(Bio::EnsEMBL::DBSQL::BaseAdaptor);
-
-=head2 fetch_all_repeat_types
-
-  Example			: my $types = $rca->fetch_all_repeat_types();
-  Description	: Returns the distinct repeat types available from a database
-  Returntype 	: Array
-  Exceptions 	: -
-
-=cut
-
-
-sub fetch_all_repeat_types {
-  my ($self) = @_;
-  return $self->dbc()->sql_helper()->execute_simple(
-    -SQL => 'SELECT DISTINCT repeat_type FROM repeat_consensus');
-}
+use vars qw(@ISA);
+@ISA = ('Bio::EnsEMBL::DBSQL::BaseAdaptor');
 
 
 =head2 fetch_by_dbID

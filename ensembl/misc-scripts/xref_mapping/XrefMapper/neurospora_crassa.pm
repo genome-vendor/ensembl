@@ -9,11 +9,7 @@ use vars qw(@ISA);
 
 sub get_set_lists {
 
-  return [["ExonerateGappedBest5", ["neurospora_crassa","RefSeq_mRNA"]],
-	  ["ExonerateGappedBest5", ["neurospora_crassa","RefSeq_mRNA_predicted"]],
-	  ["ExonerateGappedBest5", ["neurospora_crassa","RefSeq_ncRNA"]],
-	  ["ExonerateGappedBest5", ["neurospora_crassa","RefSeq_ncRNA_predicted"]],
-          ["ExonerateGappedBest1", ["neurospora_crassa","*"]]];
+  return [["ExonerateGappedBest1", ["neurospora_crassa","*"]]];
 
 }
 

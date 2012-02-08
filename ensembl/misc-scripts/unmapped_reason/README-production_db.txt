@@ -4,9 +4,9 @@ database.
 The production database is kept on the ens-staging1 server and is called
 "ensembl_production".
 
-The master table for the unmapped_reason table is called
-"master_unmapped_reason" and should be copied to any new Core or
-Core-like database into the unmapped_reason table (as in: rename it).
+The master table for the external_db table is called
+"master_unmapped_reason" and should be copied as-is to any new Core or
+Core-like database.
 
 For new entries, please insert them into this master table (after
 notifying the current release coordinator).
@@ -22,4 +22,4 @@ Please run that script with its "--about" and "--help" command line
 switches for more information.
 
 
-$Id: README-production_db.txt,v 1.2 2011/12/08 14:56:21 mh6 Exp $
+$Id: README-production_db.txt,v 1.1 2010/11/16 14:10:33 ak4 Exp $

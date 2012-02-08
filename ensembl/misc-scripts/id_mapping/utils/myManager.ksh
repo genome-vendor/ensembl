@@ -2,9 +2,6 @@
 
 scriptname=$0
 
-# THIS IS WHERE PERL WILL BE PICKED UP FROM:
-export PATH=/software/perl-5.8.8/bin:${PATH}
-
 function usage {
   cat <<EOT
 
@@ -50,4 +47,4 @@ fi
   -pass ${dbpass} \
   -dbname ${dbname}
 
-# $Id: myManager.ksh,v 1.6 2011/11/30 11:42:01 ak4 Exp $
+# $Id: myManager.ksh,v 1.5 2009/10/28 11:03:53 ak4 Exp $

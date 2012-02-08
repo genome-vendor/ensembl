@@ -4,7 +4,7 @@ package Bio::EnsEMBL::Utils::Scalar;
 
 =head1 LICENSE
 
-  Copyright (c) 1999-2012 The European Bioinformatics Institute and
+  Copyright (c) 1999-2011 The European Bioinformatics Institute and
   Genome Research Limited.  All rights reserved.
 
   This software is distributed under a modified Apache license.
@@ -78,7 +78,7 @@ $Author: ady $
 
 =head1 VERSION
 
-$Revision: 1.12 $
+$Revision: 1.11 $
 
 =cut
 

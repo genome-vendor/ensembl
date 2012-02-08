@@ -1,6 +1,6 @@
 =head1 LICENSE
 
-  Copyright (c) 1999-2012 The European Bioinformatics Institute and
+  Copyright (c) 1999-2011 The European Bioinformatics Institute and
   Genome Research Limited.  All rights reserved.
 
   This software is distributed under a modified Apache license.
@@ -75,7 +75,7 @@ use Bio::EnsEMBL::IdMapping::ScoredMappingMatrix;
 
 =cut
 
-# TODO: shrinked = shrunken?
+#
 sub create_shrinked_matrix {
   my $self = shift;
   my $matrix = shift;

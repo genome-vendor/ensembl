@@ -435,7 +435,6 @@ sub upload_xref_object_graphs {
 
 
     # disable error handling here as we'll do it ourselves
-    # reenabled it, as errorcodes are really unhelpful
     $xref_sth->{RaiseError} = 0;
     $xref_sth->{PrintError} = 0;
 
@@ -536,7 +535,6 @@ sub upload_xref_object_graphs {
 	 #################
 	 # Insert the xref
 	 #################
-	 # print "inserting $dep{ACCESSION},$dep{VERSION},$dep{LABEL},$dep{DESCRIPTION},$dep{SOURCE_ID},${\$xref->{SPECIES_ID}}\n";
 	 $xref_sth->execute($dep{ACCESSION},
 			   $dep{VERSION} || 0,
 			   $dep{LABEL} || $dep{ACCESSION},

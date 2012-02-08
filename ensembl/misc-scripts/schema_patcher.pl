@@ -4,11 +4,11 @@ use strict;
 use warnings;
 
 use DBI qw( :sql_types );
-use File::Spec::Functions qw/:ALL/;
+use File::Spec::Functions;
 use Getopt::Long qw( :config no_ignore_case auto_version );
 use IO::Dir;
 
-my $rcsid = '$Revision: 1.26 $';
+my $rcsid = '$Revision: 1.9 $';
 our ($VERSION) = $rcsid =~ /(\d+\.\d+)/;
 
 sub usage {
@@ -24,9 +24,7 @@ Usage:
   $indent [ --species=dbspecies ] \\
   $indent [ --cvsdir=/some/path ] \\
   $indent [ --dryrun ] \\
-  $indent [ --interactive 0|1 ]\\
   $indent [ --verbose ] [ --quiet ] \\
-  $indent [ --mysql=optional_path ]  \\
   $indent [ --fix ]
 
   $0 --help | --about
@@ -54,7 +52,7 @@ Usage:
   --species / -s    restrict to species (optional, no default)
 
   --cvsdir          the directory where the relevant Ensembl CVS modules
-                    have been checked out (optional, default=misc-scripts/../..)
+                    have been checked out (optional, default='../../')
 
   --dryrun / -n     do not actually modify databases
                     (optional, default=not set)
@@ -66,12 +64,6 @@ Usage:
   --fix             also go through all old patches to find any missing
                     patch (patching starts at release equal to the
                     oldest patch in the database) >>USE WITH CAUTION<<
-  
-  --mysql           specify the location of the mysql binary if it is not on
-                    \$PATH. Otherwise we default this to mysql
-  
-  --nointeractive   specify if you want an non-interactive patching environment
-                    (default false). >>USE WITH CAUTION<<
 
   --help        display this text
   --about       display further information
@@ -135,12 +127,6 @@ sub about {
 
         $0 -h host -u user -p password \\
           -t core -f 65 -r 66
-          
-      A genebuilder wishes to patch the same set as specified above but
-      without being prompted to apply patches
-      
-        $0 -h host -u user -p password \\
-          -t core -f 65 -r 66 --nointeractive
 
       A genebuilder patches one of her databases to release 66, and
       wants to look at what the script proposes to do before actually
@@ -178,13 +164,11 @@ my ( $opt_user, $opt_pass ) = ( undef, undef );
 my ( $opt_species, $opt_type, $opt_release ) = ( undef, undef, undef );
 my $opt_database;
 
-my $opt_cvsdir;
+my $opt_cvsdir = '../../';
 
 my $opt_dryrun;
 my $opt_from;
 my $opt_fix;
-my $opt_mysql = 'mysql';
-my $opt_interactive = 1;
 
 my ( $opt_verbose, $opt_quiet );
 
@@ -200,8 +184,6 @@ if ( !GetOptions( 'host|h=s'     => \$opt_host,
                   'cvsdir=s'     => \$opt_cvsdir,
                   'dryrun|n!'    => \$opt_dryrun,
                   'fix!'         => \$opt_fix,
-                  'mysql=s'      => \$opt_mysql,
-                  'interactive|i!' => \$opt_interactive,
                   'verbose|v!'   => \$opt_verbose,
                   'quiet|q!'     => \$opt_quiet,
                   'help!'        => sub { usage(); exit(0); },
@@ -227,21 +209,16 @@ my %patches;
 
 # Get available patches.
 
-foreach my $thing ( [ 'ensembl',               'core', 'table.sql' ],
-                    [ 'ensembl-functgenomics', 'funcgen', 'efg.sql' ],
-                    [ 'ensembl-variation',     'variation', 'table.sql' ] )
+foreach my $thing ( [ 'ensembl',               'core' ],
+                    [ 'ensembl-functgenomics', 'funcgen' ],
+                    [ 'ensembl-variation',     'variation' ] )
 {
-  my ($cvs_module, $schema_type, $schema_file) = @{$thing};
+  my $cvs_module  = $thing->[0];
+  my $schema_type = $thing->[1];
 
   if ( defined($opt_type) && $schema_type ne $opt_type ) { next }
 
-  my $sql_dir = _sql_dir($cvs_module, $schema_file);
-  if(! defined $sql_dir) {
-    if ( !$opt_quiet ) {
-      warn(sprintf("No SQL directory found for CVS module %s\n", $cvs_module));
-    }
-    next;
-  }
+  my $sql_dir = canonpath( catdir( $opt_cvsdir, $cvs_module, 'sql' ) );
   my $dh = IO::Dir->new($sql_dir);
 
   if ( !defined($dh) ) {
@@ -294,17 +271,10 @@ my $dsn = sprintf( "DBI:mysql:host=%s;port=%d", $opt_host, $opt_port );
 my $dbh = DBI->connect( $dsn, $opt_user, $opt_pass,
                         { 'RaiseError' => 0, 'PrintError' => 0 } );
 
-if(! $dbh) {
-  my $pass = ($opt_pass) ? 'with a' : 'with no';
-  warn(sprintf(q{Cannot connect to DSN '%s' with user %s %s password. Check your settings}, $dsn, $opt_user, $pass));
-  exit 1;  
-}
-
 # Loop through the databases on the server, patch the ones we want to
 # patch and filter out the ones that we don't want to patch.
 
 my $sth;
-my $found_databases = 0;
 
 if ( defined($opt_database) ) {
   $sth = $dbh->prepare("SHOW DATABASES LIKE ?");
@@ -319,9 +289,8 @@ $sth->bind_col( 1, \$database );
 
 DATABASE:
 while ( $sth->fetch() ) {
-
   if ( $database =~ /^(?:information_schema|mysql)$/ ) { next }
-  
+
   # Figure out schema version, schema type, and species name from the
   # database by querying its meta table.
 
@@ -368,43 +337,31 @@ while ( $sth->fetch() ) {
       $species = $value;
     }
     elsif ( $key eq 'patch' ) {
-      if($value =~ /^(patch_\d+_(\d+)_?[a-z]?\.sql)\|(.*)$/) {
-        my $patch_ident   = $1;
-        my $patch_release = $2;
-        my $patch_info    = $3;
-        $dbpatches{$patch_release}{$patch_ident} = $patch_info;
-      }
-      else {
-        warn "The patch value $value from database $database does not conform to the pattern of 'patch_from_to_tag|description'. Please fix";
-      }
+      $value =~ /^(patch_\d+_(\d+)_?[a-z]?\.sql)\|(.*)$/;
+      my $patch_ident   = $1;
+      my $patch_release = $2;
+      my $patch_info    = $3;
+      $dbpatches{$patch_release}{$patch_ident} = $patch_info;
     }
   } ## end while ( $sth2->fetch() )
 
   # If we haven't yet found out the schema version, schema type, or
   # species, look to the database name to provide clues.
 
-
-  if ( ! $schema_version ) {
-	#remove defined as version maybe empty string
-
+  if ( !defined($schema_version) ) {
     if ( $database =~ /_(\d+)_\w+$/ ) {
-
       $schema_version = $1;
-
       if ( defined($opt_from) ) {
         if   ( $schema_version == $opt_from ) { $schema_version_ok = 1 }
         else                                  { $schema_version_ok = 0 }
       }
-      else {
-		$schema_version_ok = 1 }
+      else { $schema_version_ok = 1 }
     }
-    elsif ( ! $opt_quiet ) {
-	  $schema_version_ok = 0;
-	  warn( sprintf( "Can not determine schema version from '%s'\n",
+    elsif ( !$opt_quiet ) {
+      warn( sprintf( "Can not determine schema version from '%s'\n",
                      $database ) );
     }
   }
-
   if ( !defined($schema_type) ) {
     if ( $database =~ /_(core|funcgen|variation)_/ ) {
       $schema_type = $1;
@@ -433,7 +390,7 @@ while ( $sth->fetch() ) {
         sprintf( "Can not determine species from '%s'\n", $database ) );
     }
   }
-  
+
   if ( $schema_version_ok &&
        $schema_type_ok &&
        ( !defined($opt_species) ||
@@ -441,31 +398,12 @@ while ( $sth->fetch() ) {
        ( ( !$opt_fix && $schema_version < $opt_release ) ||
          ( $opt_fix && $schema_version <= $opt_release ) ) )
   {
-    $found_databases = 1;
     print( '-' x ( $ENV{COLUMNS} || 80 ), "\n" );
     printf( "Considering '%s' [%s,%s,%d]\n",
             $database, defined($species) ? $species : 'unknown',
             $schema_type, $schema_version );
   }
-  else { 
-    if($opt_verbose) {
-      printf("Skipping database %s (type: %s | version: %d)\n", $database, ($schema_type||'-'), ($schema_version || 0));
-      if( $schema_type_ok && $schema_type eq $opt_type && $schema_version_ok && $schema_version == $opt_release) {
-        
-        my $release_patches = join(q{, }, sort map { $_->{patch} } @{$patches{$schema_type}{$schema_version}});
-        my $db_patches = join(q{, }, sort keys %{$dbpatches{$schema_version}});
-        
-        if($release_patches ne $db_patches) {
-          printf("\t%s patches [%s] are not the same as release %i patches [%s]; rerun with --fix and --dryrun\n", 
-            $database, $db_patches, $opt_release, $release_patches);
-        }
-      }
-      if($schema_type_ok && ! exists $patches{$schema_type}) {
-        printf("\t%s patches could not be found. Check your --cvsdir option and try again\n", $schema_type);
-      }
-    }
-    next; 
-  }
+  else { next }
 
   # Now figure out what patches we need to apply to this database.
 
@@ -488,7 +426,7 @@ while ( $sth->fetch() ) {
 
   my @apply_these;
   my $schema_version_warning = 0;
-  
+
   for ( my $r = $start_version; $r <= $opt_release; ++$r ) {
     foreach my $entry ( sort { $a->{'patch'} cmp $b->{'patch'} }
                         @{ $patches{$schema_type}{$r} } )
@@ -525,33 +463,26 @@ while ( $sth->fetch() ) {
 
   if ( $opt_dryrun || !@apply_these ) { print("\n"); next }
 
-  my $apply_patches;
   local $| = 1;
-  if($opt_interactive) {
-    print("Proceed with applying these patches? (y/N): ");
-    my $yesno = <STDIN>;
-    chomp($yesno);
-    $apply_patches = (lc($yesno) =~ /^y(?:es)?$/) ? 1 : 0;
-  }
-  else {
-    $apply_patches = 1;
-    print "Enterning non-interative mode. Will apply patches\n";
-  }
+  print("Proceed with applying these patches? (y/N): ");
 
-  if ( $apply_patches ) {
+  my $yesno = <STDIN>;
+  chomp($yesno);
+
+  if ( lc($yesno) =~ /^y(?:es)?$/ ) {
   PATCH:
     foreach my $entry (@apply_these) {
       my $patch = $entry->{'patch'};
       my $path  = $entry->{'path'};
 
-      my @cmd_list = (  $opt_mysql,
-                        "--host=$opt_host",
-                        "--user=$opt_user");
-      push(@cmd_list,   "--password=$opt_pass") if $opt_pass;
-      push(@cmd_list,   "--port=$opt_port",
-                        "--database=$database",
-                        "--verbose",
-                        "--execute=source $path" );
+      my @cmd_list = ( 'mysql',
+                       "--host=$opt_host",
+                       "--user=$opt_user",
+                       "--password=$opt_pass",
+                       "--port=$opt_port",
+                       "--database=$database",
+                       "--verbose",
+                       "--execute=source $path" );
 
       printf( "Executing the following command:\n%s\n",
               join( ' ', @cmd_list ) );
@@ -560,10 +491,6 @@ while ( $sth->fetch() ) {
         warn( sprintf( "Failed to apply patch '%s' to database '%s'!\n",
                        $patch, $database ) );
 
-        if(!$opt_interactive) {
-          warn('In non-interative mode; aborting current run');
-          exit(1);
-        }
         print("Next patch, next database, or abort? (p/d/A): ");
 
         my $response = <STDIN>;
@@ -586,34 +513,4 @@ while ( $sth->fetch() ) {
 
 } ## end while ( $sth->fetch() )
 
-if(!$found_databases) {
-  printf(('-'x80)."\n");
-  printf("No databases considered. Check your --database/--type/--release flags\n");
-  printf(('-'x80)."\n");
-}
-
 $dbh->disconnect();
-
-sub _sql_dir {
-  my ($cvs_module, $schema_file) = @_;
-  my $cvs_dir;
-  if($opt_cvsdir) {
-    $cvs_dir = $opt_cvsdir;
-  }
-  else {
-    my ($volume, $directories, $file) = splitpath(__FILE__);
-    $directories = curdir() unless $directories;
-    $cvs_dir = catdir($directories, updir(), updir());
-  }
-  my $sql_dir = rel2abs(canonpath( catdir( $cvs_dir, $cvs_module, 'sql' ) ));
-  my $schema_location = catfile($sql_dir, $schema_file);
-  if(! -f $schema_location) {
-    if($opt_verbose) {
-      printf("Could not find the schema file '%s' for E! module %s", $schema_location, $cvs_module);
-      printf("\tTry using --cvsdir if your checkouts are in a non-standard location\n") if $opt_cvsdir;
-    }
-    return;
-  }
-  printf("Using '%s' as our SQL directory\n", $sql_dir);
-  return $sql_dir;
-}

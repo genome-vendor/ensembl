@@ -13,10 +13,6 @@ my $max_slices = 100;
 my $bin_count  = 150;
 
 my ($host, $user, $pass, $port, $species);
-# Master database location:
-my ( $mhost, $mport ) = ( 'ens-staging1', '3306' );
-my ( $muser, $mpass ) = ( 'ensro',        undef );
-my $mdbname = 'ensembl_production';
 
 my ($block_count, $genome_size, $block_size );
 
@@ -24,9 +20,6 @@ GetOptions( "host|h=s",     \$host,
 	    "user|u=s",     \$user,
 	    "pass|p=s",     \$pass,
 	    "port=i",       \$port,
-	    "mhost=s", \$mhost,
-	    "mport=i", \$mport,
-	    "muser=s", \$muser,
 	    "species|s=s",  \$species );
 
 
@@ -62,6 +55,11 @@ my @sorted_slices = sort( {
 my $analysis = $analysis_adaptor->fetch_by_logic_name('snpdensity');
 
 if ( !defined($analysis) ) {
+
+   # Master database location:
+   my ( $mhost, $mport ) = ( 'ens-staging1', '3306' );
+   my ( $muser, $mpass ) = ( 'ensro',        undef );
+   my $mdbname = 'ensembl_production';
 
    my $prod_dsn = sprintf( 'DBI:mysql:host=%s;port=%d;database=%s',
                      $mhost, $mport, $mdbname );
@@ -198,7 +196,6 @@ Usage:
 
   $0 -h host [-port port] -u user -p password \\
   $indent -s species \\
-  $indent [-mhost ensembl_production host] [-mport ensembl_production host] [-muser ensembl_production host] \\
   $indent [-help]  \\
 
   -h|host             Database host to connect to
@@ -210,12 +207,6 @@ Usage:
   -p|pass             Password for user
 
   -s|species          Species name
-
-  -mhost              ensembl_production database host to connect to
-
-  -mport              ensembl_production database port to connect to
-
-  -muser              ensembl_production database username
 
   -help               This message
 

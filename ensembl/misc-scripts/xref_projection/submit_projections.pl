@@ -1,7 +1,6 @@
 use strict;
 
 use Data::Dumper;
-use Bio::EnsEMBL::ApiVersion qw/software_version/;
 
 $Data::Dumper::Useqq=1;
 $Data::Dumper::Terse = 1;
@@ -11,27 +10,27 @@ $Data::Dumper::Indent = 0;
 # Remember to check/set the various config optons
 
 # ------------------------------ config -------------------------------
-my $release = software_version();
+my $release = 65;
 
 
-my $base_dir = "mypath";
+my $base_dir = "/lustre/scratch103/ensembl/rjk/projections/";
 
-my $conf = "release_${release}.ini"; # registry config file, specifies Compara location
+my $conf = "release_65.ini"; # registry config file, specifies Compara location
 
 # location of other databases
 
 my @config = ( {
-    '-host'       => 'HOST',
-    '-port'       => 'PORT',
-    '-user'       => 'USER',
-    '-pass'       => 'PASS',
+    '-host'       => 'ens-staging1',
+    '-port'       => '3306',
+    '-user'       => 'ensadmin',
+    '-pass'       => 'ensembl',
     '-db_version' => $release
   },
   {
-    '-host'       => 'HOST',
-    '-port'       => 'PORT',
-    '-user'       => 'USER',
-    '-pass'       => 'PASS',
+    '-host'       => 'ens-staging2',
+    '-port'       => '3306',
+    '-user'       => 'ensadmin',
+    '-pass'       => 'ensembl',
     '-db_version' => $release
   } );
 
@@ -102,7 +101,6 @@ my @names_1_1 = (["human", "chimp"            ],
                  ["human", "panda"            ],
                  ["human", "turkey"           ],
                  ["human", "tasmanian_devil"  ],
-                 ["human", "coelacanth"       ],
 		 ["mouse", "kangaroo_rat"     ],
 		 ["mouse", "rat"              ]);
 
@@ -156,7 +154,6 @@ my @go_terms = (["human",      "mouse"          ],
 		["human",      "panda"          ],
 		["human",      "turkey"         ],
 		["human",      "tasmanian_devil"],
-		["human",      "coelacanth"     ],
                 ["mouse",      "human"          ],
 		["mouse",      "rat"            ],
 		["mouse",      "dog"            ],
@@ -204,8 +201,7 @@ my @go_terms = (["human",      "mouse"          ],
 		["zebrafish",      "tetraodon"  ],
 		["zebrafish",      "stickleback"],
 		["zebrafish",      "lamprey"    ],
-	  ["zebrafish",      "cod"        ],
-	  ["zebrafish",      "coelacanth" ],
+	        ["zebrafish",      "cod"    ],
 		["human",      "stickleback"    ],
 		["mouse",      "stickleback"    ],
 		["mouse",      "turkey"         ],

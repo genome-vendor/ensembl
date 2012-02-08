@@ -1,6 +1,6 @@
 =head1 LICENSE
 
-  Copyright (c) 1999-2012 The European Bioinformatics Institute and
+  Copyright (c) 1999-2011 The European Bioinformatics Institute and
   Genome Research Limited.  All rights reserved.
 
   This software is distributed under a modified Apache license.
@@ -1636,6 +1636,7 @@ sub get_wanted_chromosomes {
 
   Arg[1]      : B::E::Slice
   Arg[2]      : B::E::DBAdaptor (optional, if you don't supply one then the *first* one you generated is returned, which may or may not be what you want!)
+  Arg[3]      : Boolean - if set then all transcripts are loaded in one go rather than beng lazy loaded
   Example     : $genes = $support->get_unique_genes($slice,$dba);
   Description : Retrieve genes that are only on the slice itself - used for human where assembly patches
                 are in the assembly_exception table. Needs the PATCHes to have 'non_ref' seq_region_attributes.
@@ -1647,7 +1648,7 @@ sub get_wanted_chromosomes {
 
 sub get_unique_genes {
   my $self  = shift;
-  my ($slice,$dba) = @_;
+  my ($slice,$dba,$not_lazy) = @_;
   $slice or throw("You must supply a slice");
   $dba ||= $self->dba;
 
@@ -1656,16 +1657,14 @@ sub get_unique_genes {
   my $patch = 0;
   my $genes = [];
   if ( ! $slice->is_reference() ) {
-#  if ( 0 ) {
     $patch = 1;
     my $slices = $sa->fetch_by_region_unique( $slice->coord_system_name(),$slice->seq_region_name() );
     foreach my $slice ( @{$slices} ) {
-      push @$genes,@{$ga->fetch_all_by_Slice($slice)};
-      #      my $start = $slice->start;
+      push @$genes,@{$ga->fetch_all_by_Slice($slice,'',$not_lazy)};
     }
   }
   else {
-    $genes = $ga->fetch_all_by_Slice($slice);
+    $genes = $ga->fetch_all_by_Slice($slice,'',$not_lazy);
   }
   return ($genes, $patch);
 }

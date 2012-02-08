@@ -1,6 +1,6 @@
 =head1 LICENSE
 
-  Copyright (c) 1999-2012 The European Bioinformatics Institute and
+  Copyright (c) 1999-2011 The European Bioinformatics Institute and
   Genome Research Limited.  All rights reserved.
 
   This software is distributed under a modified Apache license.
@@ -26,6 +26,7 @@ Bio::EnsEMBL::Utils::URI
 
   use Bio::EnsEMBL::Utils::URI qw/parse_uri is_uri/;
   # or use Bio::EnsEMBL::Utils::URI qw/:all/; # to bring everything in
+  my $up = Bio::EnsEMBL::Utils::URIParser->new();
 
   my $db_uri = parse_uri('mysql://user@host:3157/db');
   my $http_uri = parse_uri('http://www.google.co.uk:80/search?q=t');

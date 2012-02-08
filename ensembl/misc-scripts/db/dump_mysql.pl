@@ -13,6 +13,7 @@ use Getopt::Long;
 use IO::Compress::Gzip qw/gzip $GzipError/;
 use Pod::Usage;
 use Sys::Hostname;
+use IO::File;
 
 my $PIGZ_BINARY = 'pigz';
 my $PIGZ_PROCESSORS = 2; #ensdb-1-* only have 4 cores
@@ -72,7 +73,8 @@ sub logging {
   if ($o->{log}) {
     $o->{verbose} = 1;
     my $file = $o->{log};
-    open my $fh, '>', $file or die "Cannot open log file '${file}' for writing: $!";
+    my $fh = IO::File->new($file, 'w');
+    $fh->autoflush(1);
     my $oldfh = select($fh);
     $self->{oldfh} = $oldfh;
   }
@@ -85,7 +87,14 @@ sub check {
 
   my @required_params;
 
-  if (! $o->{defaults}) {
+  if ($o->{defaults}) {
+    @required_params = qw/version/;
+    pod2usage(
+              -message => '-pattern is not supported with -defaults mode',
+              -verbose => 1,
+              -exitval => 1
+    ) if $o->{pattern};
+  } else {
     @required_params = qw/host username/;
     pod2usage(
               -message => '-pattern is not supported with -databases mode',
@@ -140,6 +149,14 @@ sub defaults {
   if(! $o->{username}) {
     pod2usage(
       -msg     => 'No -username given on the command line',
+      -exitval => 1,
+      -verbose => 0
+    );
+  }
+  
+  if(! defined $o->{password}) {
+    pod2usage(
+      -msg     => 'No -password given on the command line',
       -exitval => 1,
       -verbose => 0
     );
@@ -333,7 +350,7 @@ sub checksum {
     my $path = File::Spec->catfile($dir, $file);
     my $sum = `sum $path`;
     $sum =~ s/\s* $path//xms;
-    print $fh "${sum}\t${file}";
+    print $fh $file, "\t", $sum;
   }
   $fh->close();
   $self->permissions($checksum);
@@ -488,16 +505,9 @@ sub _set_opts_from_hostname {
   #Setup default connection params
   $o->{host}     = $host;
   $o->{port}     = $settings->{port};
-  
-  #Set just SQL dump mode only if specified in cfg file
-  $o->{sql}      = $settings->{sql} if $settings->{sql};
 
   if (!$o->{databases}) {
-    my $opts_pattern = $o->{pattern};
-    $opts_pattern = qr/$opts_pattern/ if $opts_pattern; 
-    my $settings_pattern = $settings->{pattern};
-    my $pattern = (defined $opts_pattern) ? $opts_pattern : $settings_pattern;
-    $o->{databases} = $self->_all_dbs($pattern);
+    $o->{databases} = $self->_all_dbs($settings->{pattern});
   }
 
   #Set default dir
@@ -510,13 +520,7 @@ sub _set_opts_from_hostname {
 sub _hostname_opts_from_config {
   my ($self) = @_;
   my $hostname_opts = {};
-  my $target_dir;
-  if($self->opts()->{version}) {
-    $target_dir = 'release-' . $self->opts()->{version};
-  }
-  else {
-    $target_dir = 'dumps';
-  }
+  my $target_dir = 'release-' . $self->opts()->{version};
   
   my $defaults = $self->opts()->{defaults};
   open my $fh, '<', $defaults or confess "Cannot open defaults file '$defaults' for reading: $!";
@@ -654,7 +658,8 @@ REQUIRED. Password of the connecting user.
 Uses the default mechanism which involves looking at the host the script
 is executing on and setting a number of options for databases to look for
 as well as port settings. C<-defaults> can be used in conjunction with
-C<-groups>, C<-species> and C<-tables> but not with parameters like <--host>.
+C<-groups>, C<-species> and C<-tables> but not with parameters like <--host>
+and C<--pattern>.
 
 The options set are specified by your custom ini-file.
 
@@ -677,7 +682,8 @@ with <--defaults>.
 =item B<--pattern>
 
 Allows the specification of a regular expression to select databases with. 
-Cannot be used in conjunction with the C<--databases> argument.
+Cannot be used in conjunction with the C<--databases> argument. Cannot be used 
+with <--defaults>.
 
 =item B<--databases>
 
@@ -740,13 +746,6 @@ form of an entry is
   port = 3306               ; port of the DB
   pattern = ^homo_sap\w+$   ; regular expression to filter DBs by
   dir = /path/to/dump/dir   ;
-  
-  ;more complex
-  [other-server-name]
-  port = 3306               ; port of the DB
-  pattern = ^web\w+$        ; regular expression to filter DBs by
-  dir = /path/to/dump/dir   ;
-  sql = 1                   ; dump just the SQL for these databases
 
 
 As an example of one which grabs all core dbs from a-m and puts it in /dumps

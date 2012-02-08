@@ -11,9 +11,6 @@ use Getopt::Long;
 use IO::File;
 use Sys::Hostname;
 use Tie::File;
-use English qw( -no_match_vars ) ;
-
-$OUTPUT_AUTOFLUSH = 1;
 
 my $start_time = time();
 
@@ -109,11 +106,6 @@ Command line switches:
                     (Optional)
                     Copy all tables except the ones specified in the
                     comma-delimited list.
-  
-  --tmpdir=TMP      (Optional)
-                    Allows for a non-standard tmp location to be used during
-                    the copy process. Normally it will create a directory
-                    called tmp in the directory above the target data dir.
 
   --help            (Optional)
                     Displays this text.
@@ -131,7 +123,6 @@ Input file format:
     4. Target server
     5. Target server port
     6. Target database name
-    7. Target location (optional)
 
   For example:
 
@@ -141,11 +132,6 @@ Input file format:
 
   Blank lines, lines containing only whitespaces, and lines starting
   with '#', are silently ignored.
-  
-  Column 7 is used only when you need to copy the database to a location which
-  is not the MySQL server's data directory. The same rules apply though that
-  the mysqlens user must have write access to this directory & to the one above
-  to create any temporary directory structures.
 
 
 Script restrictions:
@@ -172,7 +158,6 @@ my $opt_optimize = 1;    # Optimize the tables by default.
 my $opt_force = 0; # Do not reuse existing staging directory by default.
 my $opt_skip_views = 0; # Process views by default
 my $opt_innodb = 1;    # Don't skip InnoDB by default
-my $opt_tmpdir;
 
 if ( !GetOptions( 'pass=s'        => \$opt_password,
                   'flush!'        => \$opt_flush,
@@ -183,7 +168,6 @@ if ( !GetOptions( 'pass=s'        => \$opt_password,
                   'skip_tables=s' => \$opt_skip_tables,
                   'innodb!'       => \$opt_innodb,
                   'skip_views!'   => \$opt_skip_views,
-                  'tmpdir=s'      => \$opt_tmpdir,
                   'help'          => \$opt_help )
      || ( !defined($opt_password) && !defined($opt_help) ) )
 {
@@ -228,33 +212,6 @@ if ( !defined($input_file) ) {
 my %executables = ( 'myisamchk' => '/usr/local/ensembl/mysql/bin/myisamchk',
                     'rsync'     => '/usr/bin/rsync' );
 
-#Check executables
-
-print( '-' x 35, ' EXECUTABLE CHECKS ', '-' x 35, "\n" );
-foreach my $key (keys %executables) {
-  my $exe = $executables{$key};
-  my $output = `which $exe`;
-  my $rc = $? >> 8;
-  if($rc != 0) {
-    my $possible_location = `which $key 2>&1`;
-    my $loc_rc = $? >> 8;
-    if($loc_rc == 0) {
-      chomp $possible_location;
-      $executables{$key} = $possible_location;
-      printf("Can not find '%s'; using '%s'\n", $exe, $executables{$key});
-    }
-    else {
-      if($key eq 'myisamchk' && ! $opt_check) {
-        printf("Can not find '%s' but --nocheck was specified so skipping\n", $exe);
-      }
-      else {
-        die(sprintf("Can not find '%s' and using 'locate %s' yields nothing Check your path", $exe, $key));
-      }
-    }
-    $executables{$key} = $key;
-  }
-}
-
 my $run_hostname = ( gethostbyname( hostname() ) )[0];
 my $working_dir  = rel2abs( curdir() );
 
@@ -284,7 +241,7 @@ while ( my $line = $in->getline() ) {
   my $failed = 0;                     # Haven't failed so far...
 
   my ( $source_server, $source_port, $source_db,
-       $target_server, $target_port, $target_db, $target_location
+       $target_server, $target_port, $target_db
   ) = split( /\s+/, $line );
 
   my $source_hostname = ( gethostbyname($source_server) )[0];
@@ -339,8 +296,7 @@ while ( my $line = $in->getline() ) {
             'target_server'   => $target_server,
             'target_hostname' => $target_hostname,
             'target_port'     => $target_port,
-            'target_db'       => $target_db,
-            'target_location' => $target_location, } );
+            'target_db'       => $target_db, } );
   }
 } ## end while ( my $line = $in->getline...)
 
@@ -362,7 +318,6 @@ foreach my $spec (@todo) {
   my $target_hostname = $spec->{'target_hostname'};
   my $target_port     = $spec->{'target_port'};
   my $target_db       = $spec->{'target_db'};
-  my $target_location = $spec->{'target_location'};
 
   my $label = sprintf( "{ %s -> %s }==", $source_db, $target_db );
   print( '=' x ( 80 - length($label) ), $label, "\n" );
@@ -436,10 +391,6 @@ foreach my $spec (@todo) {
     next;
   }
 
-  if($target_location) {
-    $target_dir = $target_location;
-  }
-
   if ( !defined($target_dir) ) {
     warn(
       sprintf(
@@ -453,19 +404,12 @@ foreach my $spec (@todo) {
     $source_dbh->disconnect();
     next;
   }
-  
-  my $tmp_dir;
-  if($opt_tmpdir) {
-    $tmp_dir = $opt_tmpdir;
-  }
-  else {
-    $tmp_dir = canonpath( catdir( $target_dir, updir(), 'tmp' ) );
-  }
 
   printf( "SOURCE 'datadir' = '%s'\n", $source_dir );
   printf( "TARGET 'datadir' = '%s'\n", $target_dir );
-  printf( "TMPDIR = %s\n", $tmp_dir);
-  
+
+  my $tmp_dir = canonpath( catdir( $target_dir, updir(), 'tmp' ) );
+
   my $staging_dir = catdir( $tmp_dir, sprintf( "tmp.%s", $target_db ) );
   my $destination_dir = catdir( $target_dir, $target_db );
 

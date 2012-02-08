@@ -67,23 +67,6 @@ sub new_fast {
   return $self;
 }
 
-=head2 get_ExternalAdaptor
-
-  Arg[1]     	: Scalar; optional base path. Uses defaults if not given 
-  Example			: my $ea = $df->get_ExternalAdaptor('/base/path');
-  Description	: Delegates to the parent adaptor to retrieve the external 
-                adaptor for this data type
-  Returntype 	: Any; will be an adaptor that can read the given data file
-  Exceptions 	: Thrown if there is no attached adaptor. Otherwise 
-
-=cut
-
-sub get_ExternalAdaptor {
-  my ($self, $base_path) = @_;
-  my $adaptor = $self->adaptor();
-  throw "No DataFileAdaptor found in this object. Cannot request ExternalAdaptor" if ! $adaptor;
-  return $adaptor->DataFile_to_adaptor($self, $base_path);
-}
 
 =head2 path
 
@@ -92,12 +75,7 @@ sub get_ExternalAdaptor {
   Example			: my $f = $df->path();
   Description	: Used to generate the path to the file resource. Can return a
                 path to the file or a URL but it is up to the using code to
-                know how to interprate the different returned forms.
-                
-                If the data file url is canonical then this is just returned. 
-                If not then a path is generated of the form 
-                B</base/path/production_name/coord_system_version/[software_version/]db_group/name.ext> 
-                
+                know how to interprate the different returned forms
   Returntype 	: Scalar the absolute path/url to the given resource
   Exceptions 	: Thrown if the linked Coordinate System lacks a version and the
                 current database also lacks a default version
@@ -109,9 +87,12 @@ sub get_ExternalAdaptor {
 sub path {
   my ($self, $base) = @_;
   
-  return $self->url() if $self->absolute();
-  
-  $base = $self->adaptor()->get_base_path($base) if ! $base;
+  if($self->absolute()) {
+    return $self->url();
+  }
+  if(! $base) {
+    throw 'No base given';
+  }
 
   my $production_name = $self->adaptor()->db()->get_MetaContainer()->get_production_name();
   my $cs_version = $self->coord_system()->version();
