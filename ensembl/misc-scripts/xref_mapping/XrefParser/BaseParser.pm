@@ -1,0 +1,1360 @@
+package XrefParser::BaseParser;
+
+use strict;
+use warnings;
+
+use Bio::EnsEMBL::Utils::Exception;
+use XrefParser::FetchFiles;
+use XrefParser::Database;
+use Carp;
+use DBI;
+use Getopt::Long;
+
+my $base_dir = File::Spec->curdir();
+
+my $add_xref_sth = undef;
+my %add_direct_xref_sth;
+my $add_dependent_xref_sth = undef;
+my $get_xref_sth = undef;
+my $add_synonym_sth = undef;
+
+my %xref_dependent_mapped;
+
+
+my $verbose;
+
+
+###################################################
+# Create new object.
+#   set global $verbose
+#   Store the dbi form the database for easy access
+###################################################
+sub new
+{
+  my ($proto, $database, $is_verbose) = @_;
+
+  if((!defined $database)){# or (!$database->isa(XrefPArserDatabase)))
+    croak 'No database specfied';
+  }
+  $verbose = $is_verbose;
+  my $dbi = $database->dbi;
+
+  my $class = ref $proto || $proto;
+  my $self =  bless {}, $class;
+  $self->dbi($dbi);
+  return $self;
+}
+
+
+##################################
+# Getter/Setter for the dbi object
+##################################
+sub dbi {
+  my ($self, $arg) = @_;
+
+  (defined $arg) &&
+    ($self->{_dbi} = $arg );
+  return $self->{_dbi};
+}
+
+
+#######################################################################
+# Given a file name, returns a IO::Handle object.  If the file is
+# gzipped, the handle will be to an unseekable stream coming out of a
+# zcat pipe.  If the given file name doesn't correspond to an existing
+# file, the routine will try to add '.gz' to the file name or to remove
+# any .'Z' or '.gz' and try again.  Returns undef on failure and will
+# write a warning to stderr.
+#######################################################################
+sub get_filehandle
+{
+    my ($self, $file_name) = @_;
+
+    my $io =undef;
+
+    if(!(defined $file_name) or $file_name eq ''){
+      confess "No file name";
+    }
+    my $alt_file_name = $file_name;
+    $alt_file_name =~ s/\.(gz|Z)$//x;
+
+    if ( $alt_file_name eq $file_name ) {
+        $alt_file_name .= '.gz';
+    }
+
+    if ( !-e $file_name ) {
+        carp(   "File '$file_name' does not exist, "
+              . "will try '$alt_file_name'" );
+        $file_name = $alt_file_name;
+    }
+
+    if ( $file_name =~ /\.(gz|Z)$/x ) {
+        # Read from zcat pipe
+        $io = IO::File->new("zcat $file_name |")
+          or carp("Can not open file '$file_name' with 'zcat'");
+    } else {
+        # Read file normally
+        $io = IO::File->new($file_name)
+          or carp("Can not open file '$file_name'");
+    }
+
+    if ( !defined $io ) { return }
+
+    if ($verbose) {
+      print "Reading from '$file_name'...\n" || croak 'Could not print out message';
+    }
+
+    return $io;
+}
+
+
+#############################################
+# Get source ID for a particular source name
+#
+# Arg[1] source name
+# Arg[2] priority description
+#
+# Returns source_id or -1 if not found
+#############################################
+sub get_source_id_for_source_name {
+  my ($self, $source_name,$priority_desc) = @_;
+
+  my $low_name = lc $source_name;
+  my $sql = "SELECT source_id FROM source WHERE LOWER(name)='$low_name'";
+  if(defined $priority_desc){
+    $low_name = lc $priority_desc;
+    $sql .= " AND LOWER(priority_description)='$low_name'";
+    $source_name .= " ($priority_desc)";
+  }
+  my $sth = $self->dbi->prepare($sql);
+  $sth->execute();
+  my @row = $sth->fetchrow_array();
+  my $source_id;
+  if (@row) {
+    $source_id = $row[0];
+  } else {
+    carp "WARNING: There is no entity $source_name in the source-table of the xref database.\n";
+    carp "WARNING:. The external db name ($source_name) is hardcoded in the parser\n";
+    carp "WARNING: Couldn't get source ID for source name $source_name\n";
+
+    $source_id = '-1';
+  }
+  return $source_id;
+}
+
+
+
+############################################################
+# Get a set of source IDs matching a source name pattern
+#
+# Adds % to each end of the source name and doe a like query
+# to find all the matching source names source_ids.
+#
+# Returns an empty list if none found.
+############################################################
+sub get_source_ids_for_source_name_pattern {
+
+  my ($self, $source_name) = @_;
+
+  my $big_name = uc $source_name;
+  my $sql = "SELECT source_id FROM source WHERE upper(name) LIKE '%${big_name}%'";
+
+  my $sth = $self->dbi->prepare($sql);
+  my @sources;
+  $sth->execute();
+  while(my @row = $sth->fetchrow_array()){
+    push @sources,$row[0];
+  }
+  $sth->finish;
+
+  return @sources;
+
+}
+
+
+###############################
+# From a source_id get the name
+###############################
+sub get_source_name_for_source_id {
+  my ($self, $source_id) = @_;
+  my $source_name;
+
+  my $sql = "SELECT name FROM source WHERE source_id= '$source_id'";
+  my $sth = $self->dbi->prepare($sql);
+  $sth->execute();
+  my @row = $sth->fetchrow_array();
+  if (@row) {
+    $source_name = $row[0];
+  } else {
+    carp "There is no entity with source-id  $source_id  in the source-table of the \n";
+    carp "xref-database. The source-id and the name of the source-id is hard-coded in populate_metadata.sql\n" ;
+    carp "and in the parser\n";
+    carp "Couldn't get source name for source ID $source_id\n";
+    $source_name = '-1';
+  }
+  return $source_name;
+}
+
+
+
+####################################################
+# Get a hash to go from accession of a dependent xref
+# to master_xref_id for all of source names given
+#####################################################
+sub get_valid_xrefs_for_dependencies{
+  my ($self, $dependent_name, @reverse_ordered_source_list) = @_;
+
+  my %dependent_2_xref;
+
+
+  my $sql = 'select source_id from source where LOWER(name) =?';
+  my $sth = $self->dbi->prepare($sql);
+  my @dependent_sources;
+  $sth->execute(lc $dependent_name);
+  while(my @row = $sth->fetchrow_array()){
+   push @dependent_sources,$row[0];
+  }
+
+  my @sources;
+  foreach my $name (@reverse_ordered_source_list){
+    $sth->execute(lc $name);
+    while(my @row = $sth->fetchrow_array()){
+      push @sources,$row[0];
+    }
+  }
+  $sth->finish;
+
+  my $dep_sql = (<<'DSS');
+  SELECT d.master_xref_id, x2.accession
+    FROM dependent_xref d, xref x1, xref x2
+      WHERE x1.xref_id = d.master_xref_id AND
+            x1.source_id = ? AND
+            x2.xref_id = d.dependent_xref_id AND
+            x2.source_id = ?
+DSS
+
+  $sth = $self->dbi->prepare($dep_sql);
+  foreach my $d (@dependent_sources){
+    foreach my $s (@sources){
+       $sth->execute($s,$d);
+       while(my @row = $sth->fetchrow_array()){
+	 $dependent_2_xref{$row[1]} = $row[0];
+       }
+     }
+  }
+  return \%dependent_2_xref;
+}
+
+
+
+####################################################
+# Get a hash to go from accession of a direct xref
+# to master_xref_id for all of source names given
+#####################################################
+sub get_valid_xrefs_for_direct_xrefs{
+  my ($self, $direct_name, $separator) = @_;
+
+  my %direct_2_xref;
+
+
+  my $sql = 'select source_id from source where name like ?';
+  my $sth = $self->dbi->prepare($sql);
+  my @direct_sources;
+  $sth->execute("${direct_name}%");
+  while(my @row = $sth->fetchrow_array()){
+    push @direct_sources,$row[0];
+  }
+
+  my $gen_sql =(<<"GDS");
+SELECT d.general_xref_id, d.ensembl_stable_id, 'TYPE', d.linkage_xref, x1.accession
+  FROM TABLE_direct_xref d, xref x1
+    WHERE x1.xref_id = d.general_xref_id AND
+          x1.source_id=?
+GDS
+
+  my @sth;
+  my $i=0;
+  foreach my $type (qw(Gene Transcript Translation)){
+    my $t_sql = $gen_sql;
+    my $table = lc $type;
+    $t_sql =~ s/TABLE/$table/xsm;
+    $t_sql =~ s/TYPE/$type/xsm;
+
+    $sth[$i++] = $self->dbi->prepare($t_sql);
+  }
+
+  foreach my $d (@direct_sources){
+    for my $ii (0..2) {
+      $sth[$ii]->execute($d);
+      while(my ($gen_xref_id, $stable_id, $type, $link, $acc) = $sth[$ii]->fetchrow_array()){
+	$direct_2_xref{$acc} = $gen_xref_id.$separator.$stable_id.$separator.$type.$separator.$link;
+      }
+    }
+  }
+
+  return \%direct_2_xref;
+}
+
+
+#############################################
+# Get a hash of label to acc for a particular
+# source name and species_id
+#############################################
+sub label_to_acc{
+
+  my ($self,$source_name,$species_id) =@_;
+
+  # First cache synonyms so we can quickly add them later
+  my %synonyms;
+  my $syn_sth = $self->dbi->prepare('SELECT xref_id, synonym FROM synonym');
+  $syn_sth->execute();
+
+  my ($xref_id, $synonym);
+  $syn_sth->bind_columns(\$xref_id, \$synonym);
+  while ($syn_sth->fetch()) {
+
+    push @{$synonyms{$xref_id}}, $synonym;
+
+  }
+
+  my %valid_codes;
+  my @sources;
+
+  my $big_name = uc $source_name;
+  my $sql = "select source_id from source where upper(name) like '%${big_name}%'";
+  my $sth = $self->dbi->prepare($sql);
+  $sth->execute();
+  while(my @row = $sth->fetchrow_array()){
+    push @sources,$row[0];
+  }
+  $sth->finish;
+
+  foreach my $source (@sources){
+    $sql = "select label, xref_id from xref where species_id = $species_id and source_id = $source";
+    $sth = $self->dbi->prepare($sql);
+    $sth->execute();
+    while(my @row = $sth->fetchrow_array()){
+      $valid_codes{$row[0]} =$row[1];
+      # add any synonyms for this xref as well
+      foreach my $syn (@{$synonyms{$row[1]}}) {
+	$valid_codes{$syn} = $row[1];
+      }
+    }
+  }
+  return \%valid_codes;
+}
+
+
+####################################################
+# get_valid_codes
+#
+# hash of accession to array of xrefs.
+# This is an array becouse more than one entry can
+# exist. i.e. for uniprot and refseq we have direct
+# and sequence match sets and we need to give both.
+####################################################
+sub get_valid_codes{
+
+  my ($self,$source_name,$species_id) =@_;
+
+  # First cache synonyms so we can quickly add them later
+  my %synonyms;
+  my $dbi = $self->dbi;
+  my $syn_sth = $dbi->prepare('SELECT xref_id, synonym FROM synonym');
+  $syn_sth->execute();
+
+  my ($xref_id, $synonym);
+  $syn_sth->bind_columns(\$xref_id, \$synonym);
+  while ($syn_sth->fetch()) {
+
+    push @{$synonyms{$xref_id}}, $synonym;
+
+  }
+
+  my %valid_codes;
+  my @sources;
+
+  my $big_name = uc $source_name;
+  my $sql = "select source_id from source where upper(name) like '%$big_name%'";
+  my $sth = $dbi->prepare($sql);
+  $sth->execute();
+  while(my @row = $sth->fetchrow_array()){
+    push @sources,$row[0];
+  }
+  $sth->finish;
+
+  foreach my $source (@sources){
+    $sql = "select accession, xref_id from xref where species_id = $species_id and source_id = $source";
+    $sth = $dbi->prepare($sql);
+    $sth->execute();
+    while(my @row = $sth->fetchrow_array()){
+      push @{$valid_codes{$row[0]}}, $row[1];
+      # add any synonyms for this xref as well
+      foreach my $syn (@{$synonyms{$row[1]}}) {
+	push @{$valid_codes{$syn}}, $row[1];
+      }
+    }
+  }
+  return \%valid_codes;
+}
+
+##############################
+# Upload xrefs to the database
+##############################
+sub upload_xref_object_graphs {
+  my ($self, $rxrefs) = @_;
+
+  my $count = scalar @{$rxrefs};
+  if($verbose) {
+    print "count = $count\n" || croak 'Could not print out count';
+  }
+
+  if ($count) {
+
+    #################
+    # upload new ones
+    ##################
+    if ($verbose) {
+      print "Uploading xrefs\n"
+	|| croak 'Could not print string';
+    }
+
+
+    #################################################################################
+    # Start of sql needed to add xrefs, primary_xrefs, synonym, dependent_xrefs etc..
+    #################################################################################
+    my $dbi = $self->dbi;
+    my $xref_sth = $dbi->prepare('INSERT INTO xref (accession,version,label,description,source_id,species_id, info_type) VALUES(?,?,?,?,?,?,?)');
+    my $pri_insert_sth = $dbi->prepare('INSERT INTO primary_xref VALUES(?,?,?,?)');
+    my $pri_update_sth = $dbi->prepare('UPDATE primary_xref SET sequence=? WHERE xref_id=?');
+    my $syn_sth = $dbi->prepare('INSERT INTO synonym VALUES(?,?)');
+    my $dep_sth = $dbi->prepare('INSERT INTO dependent_xref (master_xref_id, dependent_xref_id, linkage_annotation, linkage_source_id) VALUES(?,?,?,?)');
+    my $xref_update_label_sth = $dbi->prepare('UPDATE xref SET label=? WHERE xref_id=?');
+    my $xref_update_descr_sth = $dbi->prepare('UPDATE xref SET description=? WHERE xref_id=?');
+    my $pair_sth = $dbi->prepare('INSERT INTO pairs VALUES(?,?,?)');
+
+
+    # disable error handling here as we'll do it ourselves
+    # reenabled it, as errorcodes are really unhelpful
+    $xref_sth->{RaiseError} = 0;
+    $xref_sth->{PrintError} = 0;
+
+    #################################################################################
+    # End of sql needed to add xrefs, primary_xrefs, synonym, dependent_xrefs etc..
+    #################################################################################
+
+
+    foreach my $xref (@{$rxrefs}) {
+       my $xref_id=undef;
+       if(!(defined $xref->{ACCESSION} )){
+	 print "Your xref does not have an accession-number,so it can't be stored in the database\n"
+	   || croak 'Could not write message';
+	 return;
+       }
+
+       ########################################
+       # Create entry in xref table and note ID
+       ########################################
+       if(! $xref_sth->execute($xref->{ACCESSION},
+			 $xref->{VERSION} || 0,
+			 $xref->{LABEL}|| $xref->{ACCESSION},
+			 $xref->{DESCRIPTION},
+			 $xref->{SOURCE_ID},
+			 $xref->{SPECIES_ID},
+			 $xref->{INFO_TYPE} || 'MISC')){
+	 #
+	 #  if we failed to add the xref it must already exist so go find the xref_id for this
+	 #
+	 if(!(defined $xref->{SOURCE_ID})){
+	   print "your xref: $xref->{ACCESSION} does not have a source-id\n";
+	   return;
+	 }
+	 $xref_id = $self->get_xref_id({ sth        => $xref_sth,
+					 error      => $dbi->err,
+					 acc        => $xref->{ACCESSION},
+					 source_id  => $xref->{SOURCE_ID},
+					 species_id => $xref->{SPECIES_ID}} );
+	 if(defined $xref->{LABEL} ) {
+	   $xref_update_label_sth->execute($xref->{LABEL},$xref_id) ;
+	 }
+	 if(defined $xref->{DESCRIPTION} ){
+	   $xref_update_descr_sth->execute($xref->{DESCRIPTION},$xref_id);
+	 }
+       }
+       else{
+	 #
+	 # get the xref_id for the newly created xref.
+	 #
+	 $xref_id = $self->get_xref_id({ sth        => $xref_sth,
+					 error      => $dbi->err,
+					 acc        => $xref->{ACCESSION},
+					 source_id  => $xref->{SOURCE_ID},
+					 species_id => $xref->{SPECIES_ID}} );
+       }
+
+       ################
+       # Error checking
+       ################
+       if(!((defined $xref_id) and $xref_id)){
+	 print STDERR "xref_id is not set for :\n".
+	   "$xref->{ACCESSION}\n$xref->{LABEL}\n".
+	     "$xref->{DESCRIPTION}\n$xref->{SOURCE_ID}\n".
+	       "$xref->{SPECIES_ID}\n";
+       }
+
+
+       #############################################################################
+       # create entry in primary_xref table with sequence; if this is a "cumulative"
+       # entry it may already exist, and require an UPDATE rather than an INSERT
+       #############################################################################
+       if(defined $xref->{SEQUENCE} ){
+	 if ( $self->primary_xref_id_exists($xref_id) ) {
+	   $pri_update_sth->execute( $xref->{SEQUENCE}, $xref_id )
+	     or croak( $dbi->errstr() );
+	 } else {
+	   $pri_insert_sth->execute( $xref_id, $xref->{SEQUENCE},
+				     $xref->{SEQUENCE_TYPE},
+				     $xref->{STATUS} )
+	     or croak( $dbi->errstr() );
+	 }
+       }
+
+       ##########################################################
+       # if there are synonyms, add entries in the synonym table
+       ##########################################################
+       foreach my $syn ( @{ $xref->{SYNONYMS} } ) {
+	 $syn_sth->execute( $xref_id, $syn )
+	   or croak( $dbi->errstr() . "\n $xref_id\n $syn\n" );
+       }
+
+       #######################################################################
+       # if there are dependent xrefs, add xrefs and dependent xrefs for them
+       #######################################################################
+       foreach my $depref (@{$xref->{DEPENDENT_XREFS}}) {
+	 my %dep = %{$depref};
+
+	 #################
+	 # Insert the xref
+	 #################
+	 # print "inserting $dep{ACCESSION},$dep{VERSION},$dep{LABEL},$dep{DESCRIPTION},$dep{SOURCE_ID},${\$xref->{SPECIES_ID}}\n";
+	 $xref_sth->execute($dep{ACCESSION},
+			   $dep{VERSION} || 0,
+			   $dep{LABEL} || $dep{ACCESSION},
+			   $dep{DESCRIPTION} || '',
+			   $dep{SOURCE_ID},
+			   $xref->{SPECIES_ID},
+                           'DEPENDENT');
+
+	 #####################################
+	 # find the xref_id for dependent xref
+	 #####################################
+	 my $dep_xref_id = $self->get_xref_id({ sth        => $xref_sth,
+						 error      => $dbi->err,
+						 acc        => $dep{ACCESSION},
+						 source_id  => $dep{SOURCE_ID},
+						 species_id => $xref->{SPECIES_ID}} );
+
+	 if(!(defined $dep_xref_id) || $dep_xref_id ==0 ){
+	   print STDERR "acc = $dep{ACCESSION} \nlink = $dep{LINKAGE_SOURCE_ID} \n".$dbi->err."\n";
+	   print STDERR "source = $dep{SOURCE_ID}\n";
+	 }
+
+	 #
+	 # Add the linkage_annotation and source id it came from
+	 #
+	 $dep_sth->execute( $xref_id, $dep_xref_id,
+			    $dep{LINKAGE_ANNOTATION},
+			    $dep{LINKAGE_SOURCE_ID} )
+	   or croak( $dbi->errstr() );
+
+	 #########################################################
+	 # if there are synonyms, add entries in the synonym table
+	 #########################################################
+	 foreach my $syn ( @{ $dep{SYNONYMS} } ) {
+	   $syn_sth->execute( $dep_xref_id, $syn )
+	     or croak( $dbi->errstr() . "\n $xref_id\n $syn\n" );
+	 } # foreach syn
+
+       } # foreach dep
+
+       #################################################
+       # Add the pair data. refseq dna/pep pairs usually
+       #################################################
+       if(defined $xref_id and defined $xref->{PAIR} ){
+	 $pair_sth->execute($xref->{SOURCE_ID},$xref->{ACCESSION},$xref->{PAIR});
+       }
+
+
+       ###########################
+       # tidy up statement handles
+       ###########################
+       if(defined $xref_sth) {$xref_sth->finish()};
+       if(defined $pri_insert_sth) {$pri_insert_sth->finish()} ;
+       if(defined $pri_update_sth) {$pri_update_sth->finish()};
+
+     }  # foreach xref
+
+  }
+  return 1;
+}
+
+######################################################################################
+# Add direct xref to the table XXX_direct_xref. (XXX -> Gene.Transcript or Translation
+# Xref has to exist already, this module just adds ot yo the direct_xref table.
+# $direct_xref is a reference to an array of hash objects.
+######################################################################################
+sub upload_direct_xrefs{
+  my ($self, $direct_xref)  = @_;
+  for my $dr(@{$direct_xref}) {
+
+    ################################################
+    # Find the xref_id for this accession and source
+    ################################################
+    my $general_xref_id = get_xref($dr->{ACCESSION},$dr->{SOURCE_ID},$dr->{SPECIES_ID});
+
+    #######################################################
+    # If found add the direct xref else write error message
+    #######################################################
+    if ($general_xref_id){
+      $self->add_direct_xref($general_xref_id, $dr->{ENSEMBL_STABLE_ID},$dr->{ENSEMBL_TYPE},$dr->{LINKAGE_XREF});
+    }
+    else{
+      print {*STDERR} 'Problem Could not find accession '.$dr->{ACCESSION}.' for source '.$dr->{SOURCE}.
+	' so not able to add direct xref to '.$dr->{ENSEMBL_STABLE_ID}."\n";
+    }
+  }
+  return;
+}
+
+
+
+
+###############################################
+# Insert into the meta table the key and value.
+###############################################
+sub add_meta_pair {
+
+  my ($self, $key, $value) = @_;
+
+  my $sth = $self->dbi->prepare('insert into meta (meta_key, meta_value, date) values("'.$key.'", "'.$value.'", now())');
+  $sth->execute;
+  $sth->finish;
+  return;
+}
+
+
+
+#################################################
+# Create a hash of all the source names for xrefs
+#################################################
+sub get_xref_sources {
+
+  my $self = shift;
+  my %sourcename_to_sourceid;
+
+  my $dbi = $self->dbi;
+  my $sth = $dbi->prepare('SELECT name,source_id FROM source');
+  $sth->execute() or croak( $dbi->errstr() );
+  while(my @row = $sth->fetchrow_array()) {
+    my $source_name = $row[0];
+    my $source_id = $row[1];
+    $sourcename_to_sourceid{$source_name} = $source_id;
+  }
+  $sth->finish;
+
+  return %sourcename_to_sourceid;
+}
+
+########################################################################
+# Create and return a hash that that goes from species_id to taxonomy_id
+########################################################################
+sub species_id2taxonomy {
+
+  my $self = shift;
+
+  my %species_id2taxonomy;
+  my $dbi = $self->dbi;
+
+  my $sth = $dbi->prepare('SELECT species_id, taxonomy_id FROM species');
+  $sth->execute() or croak( $dbi->errstr() );
+  while(my @row = $sth->fetchrow_array()) {
+    my $species_id = $row[0];
+    my $taxonomy_id = $row[1];
+    if(defined $species_id2taxonomy{$species_id} ){
+      push @{$species_id2taxonomy{$species_id}}, $taxonomy_id;
+    }
+    else{
+      $species_id2taxonomy{$species_id} = [$taxonomy_id];
+    }
+  }
+  return %species_id2taxonomy;
+}
+
+
+
+#########################################################################
+# Create and return a hash that that goes from species_id to species name
+#########################################################################
+sub species_id2name {
+  my $self = shift;
+
+  my %species_id2name;
+
+  my $dbi = $self->dbi;
+  my $sth = $dbi->prepare('SELECT species_id, name FROM species');
+  $sth->execute() or croak( $dbi->errstr() );
+  while ( my @row = $sth->fetchrow_array() ) {
+    my $species_id = $row[0];
+    my $name       = $row[1];
+    $species_id2name{$species_id} = [ $name ];
+  }
+
+  ##############################################
+  # Also populate the hash with all the aliases.
+  ##############################################
+  $sth = $dbi->prepare('SELECT species_id, aliases FROM species');
+  $sth->execute() or croak( $dbi->errstr() );
+  while ( my @row = $sth->fetchrow_array() ) {
+    my $species_id = $row[0];
+    foreach my $name ( split /,\s*/xms, $row[1] ) {
+      $species_id2name{$species_id} ||= [];
+      push @{$species_id2name{$species_id}}, $name;
+    }
+  }
+
+  return %species_id2name;
+} ## end sub species_id2name
+
+
+###########################################################################
+# If there was an error, an xref with the same acc & source already exists.
+# If so, find its ID, otherwise get ID of xref just inserted
+###########################################################################
+sub get_xref_id {
+  my ($self, $arg_ref) = @_;
+  my $sth     = $arg_ref->{sth}        || croak 'Need a statement handle for get_xref_id';
+  my $acc     = $arg_ref->{acc}        || croak 'Need an accession for get_xref_id';
+  my $source  = $arg_ref->{source_id}  || croak 'Need an source_id for get_xref_id';
+  my $species = $arg_ref->{species_id} || confess 'Need an species_id for get_xref_id';
+  my $error   = $arg_ref->{error};
+
+  my $id;
+
+  if ($error and ($error eq '1062')) {  # duplicate (okay so get the original) 
+    $id = $self->get_xref($acc, $source, $species);
+  }
+  elsif ($error){
+    croak "Error $error";
+  }
+  else {
+    $id = $sth->{'mysql_insertid'};
+  }
+
+  return $id;
+}
+
+##################################################################
+# If primary xref already exists for a partiuclar xref_id return 1
+# else return 0;
+##################################################################
+sub primary_xref_id_exists {
+
+  my ($self, $xref_id) = @_;
+
+  my $exists = 0;
+
+  my $dbi = $self->dbi;
+  my $sth = $dbi->prepare('SELECT xref_id FROM primary_xref WHERE xref_id=?');
+  $sth->execute($xref_id) or croak( $dbi->errstr() );
+  my @row = $sth->fetchrow_array();
+  my $result = $row[0];
+  if (defined $result) {$exists = 1; }
+
+  return $exists;
+
+}
+
+############################################
+# Get the tax id for a particular species id
+############################################
+sub get_taxonomy_from_species_id{
+  my ($self,$species_id) = @_;
+  my %hash;
+
+  my $dbi= $self->dbi;
+  my $sth = $dbi->prepare("SELECT taxonomy_id FROM species WHERE species_id = $species_id");
+  $sth->execute() or croak( $dbi->errstr() );
+  while(my @row = $sth->fetchrow_array()) {
+    $hash{$row[0]} = 1;
+  }
+  $sth->finish;
+  return \%hash;
+}
+
+
+################################################
+# xref_id for a given stable id and linkage_xref
+# Only used in GOParser at the moment
+################################################
+sub get_direct_xref{
+ my ($self,$stable_id,$type,$link) = @_;
+
+ $type = lc $type;
+
+ my $dbi = $self->dbi;
+ my $sql = "select general_xref_id from ${type}_direct_xref d where ensembl_stable_id = ?  and linkage_xref= ?";
+ my  $direct_sth = $dbi->prepare($sql);
+
+ $direct_sth->execute( $stable_id, $link ) or croak( $dbi->errstr() );
+ if(my @row = $direct_sth->fetchrow_array()) {
+   return $row[0];
+ }
+ return;
+}
+
+
+###################################################################
+# return the xref_id for a particular accession, source and species
+# if not found return undef;
+###################################################################
+sub get_xref{
+  my ($self,$acc,$source, $species_id) = @_;
+
+  my $dbi = $self->dbi;
+  #
+  # If the statement handle does nt exist create it.
+  #
+  if(!(defined $get_xref_sth) ){
+    my $sql = 'select xref_id from xref where accession = ? and source_id = ? and species_id = ?';
+    $get_xref_sth = $dbi->prepare($sql);
+  }
+
+  #
+  # Find the xref_id using the sql above
+  #
+  $get_xref_sth->execute( $acc, $source, $species_id ) or croak( $dbi->errstr() );
+  if(my @row = $get_xref_sth->fetchrow_array()) {
+    return $row[0];
+  }
+  return;
+}
+
+
+###########################################################
+# Create an xref..
+# If it already exists it return that xrefs xref_id
+# else creates it and return the new xre_id
+###########################################################
+sub add_xref {
+  my ( $self, $arg_ref) = @_;
+
+  my $acc         = $arg_ref->{acc}        || croak 'add_xref needs aa acc';
+  my $source_id   = $arg_ref->{source_id}  || croak 'add_xref needs a source_id';
+  my $species_id  = $arg_ref->{species_id} || croak 'add_xref needs a species_id';
+  my $label       = $arg_ref->{label}      || $acc;
+  my $description = $arg_ref->{desc}       || '';
+  my $version     = $arg_ref->{version}    || 0;
+  my $info_type   = $arg_ref->{info_type}  || 'MISC';
+
+
+  ##################################################################
+  # See if it already exists. It so return the xref_id for this one.
+  ##################################################################
+  my $xref_id = $self->get_xref($acc,$source_id, $species_id);
+  if(defined $xref_id){
+    return $xref_id;
+  }
+
+
+  #######################################################################
+  # If the statement handle for the insertion of xrefs does not exist yet
+  # then create it
+  #######################################################################
+  if (!(defined $add_xref_sth) ) {
+    $add_xref_sth =
+      $self->dbi->prepare( 'INSERT INTO xref '
+         . '(accession,version,label,description,source_id,species_id, info_type) '
+         . 'VALUES(?,?,?,?,?,?,?)' );
+  }
+
+  ######################################################################
+  # If the description is more than 255 characters, chop it off and add
+  # an indication that it has been truncated to the end of it.
+  ######################################################################
+  if (defined $description && ((length $description) > 255 ) ) {
+    my $truncmsg = ' /.../';
+    substr $description, 255 - (length $truncmsg),
+            length $truncmsg, $truncmsg;
+  }
+
+
+  ####################################
+  # Add the xref and croak if it fails
+  ####################################
+  $add_xref_sth->execute( $acc, $version || 0, $label,
+                          $description, $source_id, $species_id, $info_type
+  ) or croak("$acc\t$label\t\t$source_id\t$species_id\n");
+
+  return $add_xref_sth->{'mysql_insertid'};
+} ## end sub add_xref
+
+
+
+###################################################################
+# Create new xref if needed and add as a direct xref to a stable_id
+###################################################################
+sub add_to_direct_xrefs{
+  my ($self, $arg_ref) = @_;
+
+  my $stable_id   = $arg_ref->{stable_id}   || croak ('Need a direct_xref on which this xref linked too' );
+  my $type        = $arg_ref->{type}        || croak ('Need a table type on which to add');
+  my $acc         = $arg_ref->{acc}         || croak ('Need an accession of this direct xref' );
+  my $source_id   = $arg_ref->{source_id}   || croak ('Need a source_id for this direct xref' );
+  my $species_id  = $arg_ref->{species_id}  || croak ('Need a species_id for this direct xref' );
+  my $version     = $arg_ref->{version}     || 0;
+  my $label       = $arg_ref->{label}       || $acc;
+  my $description = $arg_ref->{desc};
+  my $linkage     = $arg_ref->{linkage};
+
+  my $dbi= $self->dbi();
+
+  ######################
+  # Get statement handle
+  ######################
+  if(!(defined $add_xref_sth)){
+    my $sql = (<<'AXX');
+  INSERT INTO xref (accession,version,label,description,source_id,species_id, info_type)
+          VALUES (?,?,?,?,?,?,?)
+AXX
+    $add_xref_sth = $dbi->prepare($sql);
+  }
+
+  ###############################################################
+  # If the acc already has an xrefs find it else cretae a new one
+  ###############################################################
+  my $direct_id = $self->get_xref($acc, $source_id, $species_id);
+  if(!(defined $direct_id)){
+    $add_xref_sth->execute(
+        $acc, $version || 0, $label,
+        $description, $source_id, $species_id, 'DIRECT'
+    ) or croak("$acc\t$label\t\t$source_id\t$species_id\n");
+  }
+
+  $direct_id = $self->get_xref($acc, $source_id, $species_id);
+
+  #########################
+  # Now add the direct info
+  #########################
+  $self->add_direct_xref($direct_id, $stable_id, $type, '');
+  return;
+}
+
+
+##################################################################
+# Add a single record to the direct_xref table.
+# Note that an xref must already have been added to the xref table
+##################################################################
+sub add_direct_xref {
+  my ($self, $general_xref_id, $ensembl_stable_id, $ensembl_type, $linkage_type) = @_;
+
+  my $dbi = $self->dbi;
+  #######################################################
+  # Create statement handles if they do not exist already
+  ########################################################
+  if (!(defined $add_direct_xref_sth{$ensembl_type})){
+    my $add_gene_direct_xref_sth = $dbi->prepare('INSERT INTO gene_direct_xref VALUES(?,?,?)');
+    my $add_tr_direct_xref_sth = $dbi->prepare('INSERT INTO transcript_direct_xref VALUES(?,?,?)');
+    my $add_tl_direct_xref_sth = $dbi->prepare('INSERT INTO translation_direct_xref VALUES(?,?,?)');
+    $add_direct_xref_sth{'gene'}        =  $add_gene_direct_xref_sth;
+    $add_direct_xref_sth{'transcript'}  = $add_tr_direct_xref_sth;
+    $add_direct_xref_sth{'translation'} = $add_tl_direct_xref_sth;
+    $add_direct_xref_sth{'Gene'}        = $add_gene_direct_xref_sth;
+    $add_direct_xref_sth{'Transcript'}  = $add_tr_direct_xref_sth;
+    $add_direct_xref_sth{'Translation'} = $add_tl_direct_xref_sth;
+  }
+
+  ##############################
+  # Make sure type is recognised
+  ##############################
+  if(!(defined $add_direct_xref_sth{$ensembl_type})){
+    croak "ERROR add_direct_xref_sth does not exist for $ensembl_type ???";
+  }
+  else{
+    ##########################
+    # Add the direct xref data
+    ##########################
+    $add_direct_xref_sth{$ensembl_type}->execute($general_xref_id, $ensembl_stable_id, $linkage_type);
+  }
+  return;
+}
+
+
+##########################################################
+# Create/Add xref and add it as a dependency of the master
+##########################################################
+sub add_dependent_xref{
+  my ($self, $arg_ref) = @_;
+
+  my $master_xref = $arg_ref->{master_xref_id} || croak( 'Need a master_xref_id on which this xref depends on' );
+  my $acc         = $arg_ref->{acc}            || croak( 'Need an accession of this dependent xref' );
+  my $source_id   = $arg_ref->{source_id}      || croak( 'Need a source_id for this dependent xref' );
+  my $species_id  = $arg_ref->{species_id}     || croak( 'Need a species_id for this dependent xref' );
+  my $version     = $arg_ref->{version}        ||  0;
+  my $label       = $arg_ref->{label}          || $acc;
+  my $description = $arg_ref->{desc};
+  my $linkage     = $arg_ref->{linkage};
+
+  my $dbi = $self->dbi;
+
+  ########################################
+  # Create/Get the statement handle needed
+  ########################################
+  if(!(defined $add_xref_sth)){
+    my $sql = (<<'IXR');
+INSERT INTO xref
+  (accession,version,label,description,source_id,species_id, info_type)
+  VALUES (?,?,?,?,?,?,?)
+IXR
+    $add_xref_sth = $dbi->prepare($sql);
+  }
+  if(!(defined $add_dependent_xref_sth)){
+    my $sql = (<<'ADX');
+INSERT INTO dependent_xref 
+  (master_xref_id,dependent_xref_id,linkage_annotation,linkage_source_id)
+  VALUES (?,?,?,?)
+ADX
+    $add_dependent_xref_sth = $dbi->prepare($sql);
+  }
+
+  ####################################################
+  # Does the xref already exist. If so get its xref_id
+  # else create it and get the new xref_id
+  ####################################################
+  my $dependent_id = $self->get_xref($acc, $source_id, $species_id);
+  if(!(defined $dependent_id)){
+    $add_xref_sth->execute(
+        $acc, $version, $label,
+        $description, $source_id, $species_id, 'DEPENDENT'
+    ) or croak("$acc\t$label\t\t$source_id\t$species_id\n");
+  }
+  $dependent_id = $self->get_xref($acc, $source_id, $species_id);
+
+  ################################################
+  # Croak if we have failed to create.get the xref
+  ################################################
+  if(!(defined $dependent_id)){
+    croak("$acc\t$label\t\t$source_id\t$species_id\n");
+  }
+
+  ########################################################################################
+  # If the dependency has not already been set ( is already in hash xref_dependent_mapped)
+  # then add it
+  ########################################################################################
+  if(!(defined $xref_dependent_mapped{"$master_xref|$dependent_id"})){
+    $add_dependent_xref_sth->execute( $master_xref, $dependent_id, $linkage,
+				      $source_id )
+      or croak("$master_xref\t$dependent_id\t$linkage\t$source_id");
+    $xref_dependent_mapped{"$master_xref|$dependent_id"} = 1;
+  }
+
+  return $dependent_id;
+}
+
+##################################################################
+# Add synonyms for a particular accession for one or more sources.
+# This is for priority xrefs where we have more than one source
+# but want to write synonyms for each with the same accession
+##################################################################
+sub add_to_syn_for_mult_sources{
+  my ($self, $acc, $sources, $syn, $species_id) = @_;
+
+  my $dbi = $self->dbi;
+  if(!(defined $add_synonym_sth)){
+    $add_synonym_sth =  $dbi->prepare('INSERT INTO synonym VALUES(?,?)');
+  }
+
+  foreach my $source_id (@{$sources}){
+    my $xref_id = $self->get_xref($acc, $source_id, $species_id);
+    if(defined $xref_id){
+      $add_synonym_sth->execute( $xref_id, $syn )
+        or croak( $dbi->errstr() . "\n $xref_id\n $syn\n" );
+    }
+  }
+  return;
+}
+
+
+##########################################################
+# Add synomyn for an xref given by accession and source_id
+##########################################################
+sub add_to_syn{
+  my ($self, $acc, $source_id, $syn, $species_id) = @_;
+
+  my $dbi = $self->dbi;
+  if(!(defined $add_synonym_sth)){
+    $add_synonym_sth =  $dbi->prepare('INSERT INTO synonym VALUES(?,?)');
+  }
+  my $xref_id = $self->get_xref($acc, $source_id, $species_id);
+  if(defined $xref_id){
+    $add_synonym_sth->execute( $xref_id, $syn )
+      or croak( $dbi->errstr() . "\n $xref_id\n $syn\n" );
+  }
+  else {
+      carp (  "Could not find acc $acc in "
+            . "xref table source = $source_id of species $species_id\n" );
+  }
+  return;
+}
+
+
+##########################################
+# Add synomyn for an xref given by xref_id
+##########################################
+sub add_synonym{
+  my ($self, $xref_id, $syn) = @_;
+
+  my $dbi=$self->dbi;
+  if(!(defined $add_synonym_sth)){
+    $add_synonym_sth =  $dbi->prepare('INSERT INTO synonym VALUES(?,?)');
+  }
+
+    $add_synonym_sth->execute( $xref_id, $dbi->quote($syn) )
+      or croak( $dbi->errstr() . "\n $xref_id\n " . $dbi->quote($syn) . "\n" );
+
+  return;
+}
+
+########################################################
+# Create a hash that uses the label as a key
+# and the acc as the value. Also add synonyms for these
+# as keys.
+#######################################################
+sub get_label_to_acc{
+  my ($self, $name, $species_id, $prio_desc) = @_;
+  my %hash1=();
+
+  my $sql =(<<"GLA");
+SELECT  xref.accession, xref.label
+  FROM xref, source
+    WHERE source.name LIKE '$name%' AND
+          xref.source_id = source.source_id
+GLA
+  if(defined $prio_desc){
+    $sql .= " and source.priority_description like '$prio_desc'";
+  }
+  if(defined $species_id){
+    $sql .= " and xref.species_id  = $species_id";
+  }
+  my $sub_sth = $self->dbi->prepare($sql);
+
+  $sub_sth->execute();
+  while(my @row = $sub_sth->fetchrow_array()) {
+    $hash1{$row[1]} = $row[0];
+  }
+
+
+  ####################
+  # Remember synonyms
+  ####################
+
+ $sql =(<<"GLS");
+SELECT  xref.accession, synonym.synonym 
+  FROM xref, source, synonym 
+    WHERE synonym.xref_id = xref.xref_id AND
+          source.name like '$name%' AND
+           xref.source_id = source.source_id
+GLS
+
+  if(defined $prio_desc){
+    $sql .= " AND source.priority_description LIKE '$prio_desc'";
+  }
+  if(defined $species_id){
+    $sql .= " AND xref.species_id  = $species_id";
+  }
+  $sub_sth = $self->dbi->prepare($sql);
+
+  $sub_sth->execute();
+  while(my @row = $sub_sth->fetchrow_array()) {
+    $hash1{$row[1]} = $row[0];
+  }
+
+  return \%hash1;
+}
+
+
+########################################################
+# Create a hash that uses the label as a key
+# and the desc as the value. Also add synonyms for these
+# as keys.
+#######################################################
+sub get_label_to_desc{
+  my ($self, $name, $species_id, $prio_desc) = @_;
+  my %hash1=();
+
+  my $sql =(<<"GDH");
+  SELECT xref.description, xref.label 
+    FROM xref, source 
+      WHERE source.name LIKE '$name%' AND 
+            xref.source_id = source.source_id
+GDH
+  if(defined $prio_desc){
+    $sql .= " and source.priority_description like '$prio_desc'";
+  }
+  if(defined $species_id){
+    $sql .= " and xref.species_id  = $species_id";
+  }
+  my $sub_sth = $self->dbi->prepare($sql);
+
+  $sub_sth->execute();
+  while(my @row = $sub_sth->fetchrow_array()) {
+    $hash1{$row[1]} = $row[0];
+  }
+
+  ###########################
+  # Also include the synonyms
+  ###########################
+
+  my $syn_sql =(<<"GDS");
+  SELECT xref.description, synonym.synonym
+    FROM xref, source, synonym
+      WHERE synonym.xref_id = xref.xref_id AND
+            source.name like '$name%' AND
+             xref.source_id = source.source_id
+GDS
+
+  if(defined $prio_desc){
+    $syn_sql .= " AND source.priority_description LIKE '$prio_desc'";
+  }
+  if(defined $species_id){
+    $syn_sql .= " AND xref.species_id  = $species_id";
+  }
+  $sub_sth = $self->dbi->prepare($syn_sql);
+
+  $sub_sth->execute();
+  while(my @row = $sub_sth->fetchrow_array()) {
+    $hash1{$row[1]} = $row[0];
+  }
+
+  return \%hash1;
+}
+
+
+########################################
+# Set release for a particular source_id.
+########################################
+sub set_release{
+    my ($self, $source_id, $s_release ) = @_;
+
+    my $sth =
+      $self->dbi->prepare('UPDATE source SET source_release=? WHERE source_id=?');
+
+    if($verbose) { print "Setting release to '$s_release' for source ID '$source_id'\n"; }
+
+    $sth->execute( $s_release, $source_id );
+    return;
+}
+
+
+#############################################################################
+# create a hash of all the dependent mapping that exist for a given source_id
+# Of the format {master_xref_id|dependent_xref_id}
+#############################################################################
+sub get_dependent_mappings {
+  my $self = shift;
+  my $source_id = shift;
+
+  my $sql =(<<"GDM");
+  SELECT  d.master_xref_id, d.dependent_xref_id
+    FROM dependent_xref d, xref x
+      WHERE x.xref_id = d.dependent_xref_id AND
+            x.source_id = $source_id
+GDM
+  my $sth = $self->dbi->prepare($sql);
+  $sth->execute();
+  my $master_xref;
+  my $dependent_xref;
+  $sth->bind_columns(\$master_xref,\$dependent_xref);
+  while($sth->fetch){
+    $xref_dependent_mapped{"$master_xref|$dependent_xref"}=1;
+  }
+  $sth->finish;
+  return;
+}
+
+
+##########################################################
+# Create a has that uses the accession and labels for keys
+# and an array of the synonyms as the vaules
+##########################################################
+sub get_ext_synonyms{
+  my $self = shift;
+  my $source_name = shift;
+  my %ext_syns;
+  my %seen;          # can be in more than once fro each type of external source.
+  my $separator = qw{:};
+
+  my $sql =(<<"GES");
+  SELECT  x.accession, x.label, sy.synonym
+    FROM xref x, source so, synonym sy
+      WHERE x.xref_id = sy.xref_id AND
+            so.source_id = x.source_id AND
+            so.name like '$source_name'
+GES
+  my $sth = $self->dbi->prepare($sql);
+
+  $sth->execute;
+  my ($acc, $label, $syn);
+  $sth->bind_columns(\$acc, \$label, \$syn);
+
+  my $count = 0;
+  while($sth->fetch){
+    if(!(defined $seen{$acc.$separator.$syn})){
+      push @{$ext_syns{$acc}}, $syn;
+      push @{$ext_syns{$label}}, $syn;
+      $count++;
+    }
+    $seen{$acc.$separator.$syn} = 1;
+  }
+  $sth->finish;
+
+  return \%ext_syns;
+
+}
+
+
+######################################################################
+# Store data needed to beable to revert to same stage as after parsing
+######################################################################
+sub parsing_finished_store_data {
+  my $self = shift;
+
+  # Store max id for
+
+  # gene/transcript/translation_direct_xref     general_xref_id  #Does this change??
+
+  # xref                                        xref_id
+  # dependent_xref                              object_xref_id is all null
+  # go_xref                                     object_xref_id
+  # object_xref                                 object_xref_id
+  # identity_xref                               object_xref_id
+
+  my %table_and_key =
+    ( 'xref' => 'xref_id', 'object_xref' => 'object_xref_id' );
+
+  foreach my $table ( keys %table_and_key ) {
+    my $sth = $self->dbi->prepare(
+             'select MAX(' . $table_and_key{$table} . ") from $table" );
+    $sth->execute;
+    my $max_val;
+    $sth->bind_columns( \$max_val );
+    $sth->fetch;
+    $sth->finish;
+    $self->add_meta_pair( 'PARSED_' . $table_and_key{$table},
+                          $max_val || 1 );
+  }
+  return;
+} ## end sub parsing_finished_store_data
+
+
+1;
+
