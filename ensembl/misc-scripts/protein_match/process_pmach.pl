@@ -34,11 +34,7 @@ my ($ens,$sp,$refseq,$pdb);
 &runpmatch();
 &postprocesspmatch($sp);
 &postprocesspmatch($refseq);
-<<<<<<< process_pmach.pl
-
-=======
 &postprocesspmatch($pdb);
->>>>>>> 1.8
 &finalprocess($sp);
 &finalprocess($refseq);
 &finalprocess($pdb);
